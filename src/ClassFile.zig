@@ -60,20 +60,20 @@ methods: std.ArrayList(MethodInfo),
 attributes: std.ArrayList(attributes.AttributeInfo),
 
 pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
-    var magic = try reader.readIntBig(u32);
+    const magic = try reader.readInt(u32, .big);
     if (magic != 0xCAFEBABE) return error.BadMagicValue;
 
-    var minor_version = try reader.readIntBig(u16);
-    var major_version = try reader.readIntBig(u16);
+    const minor_version = try reader.readInt(u16, .big);
+    const major_version = try reader.readInt(u16, .big);
 
-    var entry_count = (try reader.readIntBig(u16)) - 1;
+    const entry_count = (try reader.readInt(u16, .big)) - 1;
     var constant_pool = try ConstantPool.init(allocator, entry_count);
     // try constant_pool.entries.ensureTotalCapacity(constant_pool_length);
     // constant_pool.entries.items.len = z;
     try constant_pool.decodeEntries(reader);
 
-    var access_flags_u = try reader.readIntBig(u16);
-    var access_flags = AccessFlags{
+    const access_flags_u = try reader.readInt(u16, .big);
+    const access_flags = AccessFlags{
         .public = utils.isPresent(u16, access_flags_u, 0x0001),
         .final = utils.isPresent(u16, access_flags_u, 0x0010),
         .super = utils.isPresent(u16, access_flags_u, 0x0020),
@@ -85,35 +85,35 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
         .module = utils.isPresent(u16, access_flags_u, 0x8000),
     };
 
-    var this_class_u = try reader.readIntBig(u16);
-    var this_class = this_class_u;
+    const this_class_u = try reader.readInt(u16, .big);
+    const this_class = this_class_u;
 
-    var super_class_u = try reader.readIntBig(u16);
-    var super_class = if (super_class_u == 0) null else super_class_u;
+    const super_class_u = try reader.readInt(u16, .big);
+    const super_class = if (super_class_u == 0) null else super_class_u;
 
-    var interface_count = try reader.readIntBig(u16);
+    const interface_count = try reader.readInt(u16, .big);
     var interfaces = try std.ArrayList(u16).initCapacity(allocator, interface_count);
     interfaces.items.len = interface_count;
-    for (interfaces.items) |*i| i.* = try reader.readIntBig(u16);
+    for (interfaces.items) |*i| i.* = try reader.readInt(u16, .big);
 
-    var field_count = try reader.readIntBig(u16);
+    const field_count = try reader.readInt(u16, .big);
     var fieldss = try std.ArrayList(FieldInfo).initCapacity(allocator, field_count);
     fieldss.items.len = field_count;
     for (fieldss.items) |*f| f.* = try FieldInfo.decode(constant_pool, allocator, reader);
 
-    var method_count = try reader.readIntBig(u16);
+    const method_count = try reader.readInt(u16, .big);
     var methodss = try std.ArrayList(MethodInfo).initCapacity(allocator, method_count);
     methodss.items.len = method_count;
     for (methodss.items) |*m| m.* = try MethodInfo.decode(constant_pool, allocator, reader);
 
-    // var attributess = try std.ArrayList(attributes.AttributeInfo).initCapacity(allocator, try reader.readIntBig(u16));
+    // var attributess = try std.ArrayList(attributes.AttributeInfo).initCapacity(allocator, try reader.readInt(u16, .big));
     // for (attributess.items) |*a| a.* = try attributes.AttributeInfo.decode(&constant_pool, allocator, reader);
     // TODO: Fix this awful, dangerous, slow hack
-    var attributes_length = try reader.readIntBig(u16);
+    var attributes_length = try reader.readInt(u16, .big);
     var attributes_index: usize = 0;
     var attributess = std.ArrayList(attributes.AttributeInfo).init(allocator);
     while (attributes_index < attributes_length) : (attributes_index += 1) {
-        var decoded = try attributes.AttributeInfo.decode(constant_pool, allocator, reader);
+        const decoded = try attributes.AttributeInfo.decode(constant_pool, allocator, reader);
         if (decoded == .unknown) {
             attributes_length -= 1;
             continue;
@@ -136,11 +136,13 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
 }
 
 pub fn encode(self: *const ClassFile, writer: anytype) !void {
-    try writer.writeIntBig(u32, 0xCAFEBABE);
+    try writer.writeInt(u32, 0xCAFEBABE, .big);
 
-    try writer.writeIntBig(u16, self.minor_version);
-    try writer.writeIntBig(u16, self.major_version);
-    try writer.writeIntBig(u16, @intCast(u16, self.constant_pool.entries.items.len) + 1);
+    try writer.writeInt(u16, self.minor_version, .big);
+    try writer.writeInt(u16, self.major_version, .big);
+
+    const entries_count: u16 = @as(u16, @intCast(self.constant_pool.entries.items.len)) + 1;
+    try writer.writeInt(u16, entries_count, .big);
 
     var constant_pool_index: usize = 0;
     while (constant_pool_index < self.constant_pool.entries.items.len) : (constant_pool_index += 1) {
@@ -162,21 +164,25 @@ pub fn encode(self: *const ClassFile, writer: anytype) !void {
     if (self.access_flags.annotation) utils.setPresent(u16, &access_flags_u, 0x2000);
     if (self.access_flags.enum_class) utils.setPresent(u16, &access_flags_u, 0x4000);
     if (self.access_flags.module) utils.setPresent(u16, &access_flags_u, 0x8000);
-    try writer.writeIntBig(u16, access_flags_u);
+    try writer.writeInt(u16, access_flags_u, .big);
 
-    try writer.writeIntBig(u16, self.this_class);
-    try writer.writeIntBig(u16, self.super_class orelse 0);
+    try writer.writeInt(u16, self.this_class, .big);
+    try writer.writeInt(u16, self.super_class orelse 0, .big);
 
-    try writer.writeIntBig(u16, @intCast(u16, self.interfaces.items.len));
-    for (self.interfaces.items) |i| try writer.writeIntBig(u16, i);
+    const interfaces_len: u16 = @as(u16, @intCast(self.interfaces.items.len));
+    try writer.writeInt(u16, interfaces_len, .big);
+    for (self.interfaces.items) |i| try writer.writeInt(u16, i, .big);
 
-    try writer.writeIntBig(u16, @intCast(u16, self.fields.items.len));
+    const fields_len = @as(u16, @intCast(self.fields.items.len));
+    try writer.writeInt(u16, fields_len, .big);
     for (self.fields.items) |f| try f.encode(writer);
 
-    try writer.writeIntBig(u16, @intCast(u16, self.methods.items.len));
+    const methods_len = @as(u16, @intCast(self.methods.items.len));
+    try writer.writeInt(u16, methods_len, .big);
     for (self.methods.items) |m| try m.encode(writer);
 
-    try writer.writeIntBig(u16, @intCast(u16, self.attributes.items.len));
+    const attributes_len = @as(u16, @intCast(self.attributes.items.len));
+    try writer.writeInt(u16, attributes_len, .big);
     for (self.attributes.items) |a| try a.encode(writer);
 }
 
@@ -224,7 +230,7 @@ pub fn getJavaSEVersion(self: ClassFile) GetJavaSEVersionError!JavaSEVersion {
 test "Decode ClassFile" {
     const harness = @import("../test/harness.zig");
     var fbs = harness.hello.fbs();
-    var reader = fbs.reader();
+    const reader = fbs.reader();
 
     var cf = try ClassFile.decode(std.testing.allocator, reader);
     defer cf.deinit();
@@ -233,7 +239,7 @@ test "Decode ClassFile" {
 test "Encode ClassFile" {
     const harness = @import("../test/harness.zig");
     var fbs = harness.hello.fbs();
-    var reader = fbs.reader();
+    const reader = fbs.reader();
 
     var joe_file = try std.fs.cwd().createFile("Hello.class", .{});
     defer joe_file.close();

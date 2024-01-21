@@ -206,7 +206,7 @@ pub const Opcode = enum(u8) {
     impdep2 = 0xff,
 
     pub fn resolve(op: u8) Opcode {
-        return @intToEnum(Opcode, op);
+        return @enumFromInt(op);
     }
 };
 
@@ -235,14 +235,14 @@ pub const InvokeDynamicParams = struct {
         _ = allocator;
 
         return Self{
-            .index = try reader.readIntBig(u16),
-            .pad = try reader.readIntBig(u16),
+            .index = try reader.readInt(u16, .big),
+            .pad = try reader.readInt(u16, .big),
         };
     }
 
     pub fn encode(self: Self, writer: anytype) !void {
-        try writer.writeIntBig(u16, self.index);
-        try writer.writeIntBig(u16, self.pad);
+        try writer.writeInt(u16, self.index, .big);
+        try writer.writeInt(u16, self.pad, .big);
     }
 };
 
@@ -257,14 +257,14 @@ pub const InvokeInterfaceParams = struct {
         _ = allocator;
 
         return Self{
-            .index = try reader.readIntBig(u16),
+            .index = try reader.readInt(u16, .big),
             .count = try reader.readByte(),
             .pad = try reader.readByte(),
         };
     }
 
     pub fn encode(self: Self, writer: anytype) !void {
-        try writer.writeIntBig(u16, self.index);
+        try writer.writeInt(u16, self.index, .big);
         try writer.writeByte(self.count);
         try writer.writeByte(self.pad);
     }
@@ -283,17 +283,18 @@ pub const LookupSwitchParams = struct {
     pairs: []LookupPair,
 
     pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Self {
-        var skipped_bytes = std.mem.alignForward(reader.context.pos, 4) - reader.context.pos;
+        const skipped_bytes = std.mem.alignForward(usize, reader.context.pos, 4) - reader.context.pos;
         try reader.skipBytes(skipped_bytes, .{});
 
-        const default_offset = try reader.readIntBig(i32);
-        const npairs = try reader.readIntBig(i32);
+        const default_offset = try reader.readInt(i32, .big);
+        const npairs = try reader.readInt(i32, .big);
 
-        var pairs = try allocator.alloc(LookupPair, @intCast(usize, npairs));
+        const size = @as(usize, @intCast(npairs));
+        const pairs = try allocator.alloc(LookupPair, size);
         for (pairs) |*pair|
             pair.* = LookupPair{
-                .match = try reader.readIntBig(i32),
-                .offset = try reader.readIntBig(i32),
+                .match = try reader.readInt(i32, .big),
+                .offset = try reader.readInt(i32, .big),
             };
 
         return Self{
@@ -320,16 +321,17 @@ pub const TableSwitchParams = struct {
     jumps: []i32,
 
     pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Self {
-        var skipped_bytes = std.mem.alignForward(reader.context.pos, 4) - reader.context.pos;
+        const skipped_bytes = std.mem.alignForward(usize, reader.context.pos, 4) - reader.context.pos;
         try reader.skipBytes(skipped_bytes, .{});
 
-        const default_offset = try reader.readIntBig(i32);
-        const low = try reader.readIntBig(i32);
-        const high = try reader.readIntBig(i32);
+        const default_offset = try reader.readInt(i32, .big);
+        const low = try reader.readInt(i32, .big);
+        const high = try reader.readInt(i32, .big);
 
-        var jumps = try allocator.alloc(i32, @intCast(usize, high - low + 1));
+        const size = @as(usize, @intCast(high - low + 1));
+        const jumps = try allocator.alloc(i32, size);
         for (jumps) |*jump|
-            jump.* = try reader.readIntBig(i32);
+            jump.* = try reader.readInt(i32, .big);
 
         return Self{
             .skipped_bytes = skipped_bytes,
@@ -356,7 +358,7 @@ pub const MultiANewArrayParams = struct {
     pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Self {
         _ = allocator;
         return Self{
-            .index = try reader.readIntBig(u16),
+            .index = try reader.readInt(u16, .big),
             .dimensions = try reader.readByte(),
         };
     }
@@ -378,65 +380,7 @@ pub const NewArrayParams = enum(u8) {
     int = 10,
     long = 11,
 };
-
 pub const Operation = union(Opcode) {
-    aload: LocalIndexOperation,
-    anewarray: ConstantPoolRefOperation,
-    astore: LocalIndexOperation,
-    bipush: BipushParams,
-    checkcast: ConstantPoolRefOperation,
-    dload: LocalIndexOperation,
-    dstore: LocalIndexOperation,
-    fload: LocalIndexOperation,
-    fstore: LocalIndexOperation,
-    getfield: ConstantPoolRefOperation,
-    getstatic: ConstantPoolRefOperation,
-
-    goto: BranchToOffsetOperation,
-    if_acmpeq: BranchToOffsetOperation,
-    if_acmpne: BranchToOffsetOperation,
-    if_icmpeq: BranchToOffsetOperation,
-    if_icmpge: BranchToOffsetOperation,
-    if_icmpgt: BranchToOffsetOperation,
-    if_icmple: BranchToOffsetOperation,
-    if_icmplt: BranchToOffsetOperation,
-    if_icmpne: BranchToOffsetOperation,
-    ifeq: BranchToOffsetOperation,
-    ifge: BranchToOffsetOperation,
-    ifgt: BranchToOffsetOperation,
-    ifle: BranchToOffsetOperation,
-    iflt: BranchToOffsetOperation,
-    ifne: BranchToOffsetOperation,
-    ifnonnull: BranchToOffsetOperation,
-    ifnull: BranchToOffsetOperation,
-    jsr: BranchToOffsetOperation,
-
-    goto_w: BranchToOffsetWideOperation,
-    jsr_w: BranchToOffsetWideOperation,
-
-    iinc: IincParams,
-    iload: LocalIndexOperation,
-    instanceof: ConstantPoolRefOperation,
-    invokedynamic: InvokeDynamicParams,
-    invokeinterface: InvokeInterfaceParams,
-    invokespecial: ConstantPoolRefOperation,
-    invokestatic: ConstantPoolRefOperation,
-    invokevirtual: ConstantPoolRefOperation,
-    istore: LocalIndexOperation,
-    ldc: u8, // NOTE: This is not a local variable! It's probably for compat
-    ldc_w: ConstantPoolRefOperation,
-    ldc2_w: ConstantPoolRefOperation,
-    lookupswitch: LookupSwitchParams,
-    tableswitch: TableSwitchParams,
-    new: ConstantPoolRefOperation,
-    multianewarray: MultiANewArrayParams,
-    lload: LocalIndexOperation,
-    lstore: LocalIndexOperation,
-    sipush: SipushParams,
-    putstatic: ConstantPoolRefOperation,
-    putfield: ConstantPoolRefOperation,
-    newarray: NewArrayParams,
-
     nop: void,
     aconst_null: void,
     iconst_m1: void,
@@ -453,6 +397,16 @@ pub const Operation = union(Opcode) {
     fconst_2: void,
     dconst_0: void,
     dconst_1: void,
+    bipush: BipushParams,
+    sipush: SipushParams,
+    ldc: u8, // NOTE: This is not a local variable! It's probably for compat
+    ldc_w: ConstantPoolRefOperation,
+    ldc2_w: ConstantPoolRefOperation,
+    iload: LocalIndexOperation,
+    lload: LocalIndexOperation,
+    fload: LocalIndexOperation,
+    dload: LocalIndexOperation,
+    aload: LocalIndexOperation,
     iload_0: void,
     iload_1: void,
     iload_2: void,
@@ -481,6 +435,11 @@ pub const Operation = union(Opcode) {
     baload: void,
     caload: void,
     saload: void,
+    istore: LocalIndexOperation,
+    lstore: LocalIndexOperation,
+    fstore: LocalIndexOperation,
+    dstore: LocalIndexOperation,
+    astore: LocalIndexOperation,
     istore_0: void,
     istore_1: void,
     istore_2: void,
@@ -554,6 +513,7 @@ pub const Operation = union(Opcode) {
     lor: void,
     ixor: void,
     lxor: void,
+    iinc: IincParams,
     i2l: void,
     i2f: void,
     i2d: void,
@@ -574,25 +534,62 @@ pub const Operation = union(Opcode) {
     fcmpg: void,
     dcmpl: void,
     dcmpg: void,
+    ifeq: BranchToOffsetOperation,
+    ifne: BranchToOffsetOperation,
+    iflt: BranchToOffsetOperation,
+    ifge: BranchToOffsetOperation,
+    ifgt: BranchToOffsetOperation,
+    ifle: BranchToOffsetOperation,
+    if_icmpeq: BranchToOffsetOperation,
+    if_icmpne: BranchToOffsetOperation,
+    if_icmplt: BranchToOffsetOperation,
+    if_icmpge: BranchToOffsetOperation,
+    if_icmpgt: BranchToOffsetOperation,
+    if_icmple: BranchToOffsetOperation,
+    if_acmpeq: BranchToOffsetOperation,
+    if_acmpne: BranchToOffsetOperation,
+    goto: BranchToOffsetOperation,
+    jsr: BranchToOffsetOperation,
     ret: void,
+    tableswitch: TableSwitchParams,
+    lookupswitch: LookupSwitchParams,
     ireturn: void,
     lreturn: void,
     freturn: void,
     dreturn: void,
     areturn: void,
     @"return": void,
+    getstatic: ConstantPoolRefOperation,
+    putstatic: ConstantPoolRefOperation,
+    getfield: ConstantPoolRefOperation,
+    putfield: ConstantPoolRefOperation,
+    invokevirtual: ConstantPoolRefOperation,
+    invokespecial: ConstantPoolRefOperation,
+    invokestatic: ConstantPoolRefOperation,
+    invokeinterface: InvokeInterfaceParams,
+    invokedynamic: InvokeDynamicParams,
+    new: ConstantPoolRefOperation,
+    newarray: NewArrayParams,
+    anewarray: ConstantPoolRefOperation,
     arraylength: void,
     athrow: void,
+    checkcast: ConstantPoolRefOperation,
+    instanceof: ConstantPoolRefOperation,
     monitorenter: void,
     monitorexit: void,
     wide: void,
+    multianewarray: MultiANewArrayParams,
+    ifnull: BranchToOffsetOperation,
+    ifnonnull: BranchToOffsetOperation,
+    goto_w: BranchToOffsetWideOperation,
+    jsr_w: BranchToOffsetWideOperation,
     breakpoint: void,
     impdep1: void,
     impdep2: void,
 
     pub fn sizeOf(self: Operation) usize {
         inline for (std.meta.fields(Operation)) |op| {
-            if (@enumToInt(std.meta.stringToEnum(Opcode, op.name).?) == @enumToInt(self)) {
+            if (@intFromEnum(std.meta.stringToEnum(Opcode, op.name).?) == @intFromEnum(self)) {
                 return 1 + if (op.type == void) 0 else @sizeOf(op.type);
             }
         }
@@ -615,35 +612,35 @@ pub const Operation = union(Opcode) {
     };
 
     pub fn decode(allocator: std.mem.Allocator, reader: anytype) !Operation {
-        var opcode = try reader.readIntBig(u8);
-        if (opcode == @enumToInt(Opcode.wide)) {
-            var widened_opcode = try reader.readIntBig(u8);
+        const opcode = try reader.readInt(u8, .big);
+        if (opcode == @intFromEnum(Opcode.wide)) {
+            const widened_opcode = try reader.readInt(u8, .big);
 
-            if (widened_opcode == @enumToInt(Opcode.iinc)) {
-                return Operation{ .iinc = .{ .index = try reader.readIntBig(u16), .@"const" = try reader.readIntBig(i16) } };
+            if (widened_opcode == @intFromEnum(Opcode.iinc)) {
+                return Operation{ .iinc = .{ .index = try reader.readInt(u16, .big), .@"const" = try reader.readInt(i16, .big) } };
             }
 
             inline for (widenable) |op| {
-                if (@enumToInt(op) == widened_opcode) {
-                    return @unionInit(Operation, @tagName(op), try reader.readIntBig(u16));
+                if (@intFromEnum(op) == widened_opcode) {
+                    return @unionInit(Operation, @tagName(op), try reader.readInt(u16, .big));
                 }
             }
         } else {
-            if (opcode == @enumToInt(Opcode.iinc)) {
-                return Operation{ .iinc = .{ .index = try reader.readIntBig(u8), .@"const" = try reader.readIntBig(i8) } };
+            if (opcode == @intFromEnum(Opcode.iinc)) {
+                return Operation{ .iinc = .{ .index = try reader.readInt(u8, .big), .@"const" = try reader.readInt(i8, .big) } };
             }
 
             inline for (widenable) |op| {
-                if (@enumToInt(op) == opcode) {
-                    return @unionInit(Operation, @tagName(op), try reader.readIntBig(u8));
+                if (@intFromEnum(op) == opcode) {
+                    return @unionInit(Operation, @tagName(op), try reader.readInt(u8, .big));
                 }
             }
 
             inline for (std.meta.fields(Operation)) |op| {
-                if (@enumToInt(std.meta.stringToEnum(Opcode, op.name).?) == opcode) {
+                if (@intFromEnum(std.meta.stringToEnum(Opcode, op.name).?) == opcode) {
                     return @unionInit(Operation, op.name, if (op.type == void) {} else if (@typeInfo(op.type) == .Struct) z: {
                         break :z if (@hasDecl(op.type, "decode")) try @field(op.type, "decode")(allocator, reader) else unreachable;
-                    } else if (@typeInfo(op.type) == .Enum) try reader.readEnum(op.type, .Big) else if (@typeInfo(op.type) == .Int) try reader.readIntBig(op.type) else unreachable);
+                    } else if (@typeInfo(op.type) == .Enum) try reader.readEnum(op.type, .big) else if (@typeInfo(op.type) == .Int) try reader.readInt(op.type, .big) else unreachable);
                 }
             }
         }
@@ -653,48 +650,51 @@ pub const Operation = union(Opcode) {
 
     pub fn encode(self: Operation, writer: anytype) !void {
         if (self == .iinc) {
-            var iinc = self.iinc;
+            const iinc = self.iinc;
             if (iinc.index > std.math.maxInt(u8) or iinc.@"const" > std.math.maxInt(i8) or iinc.@"const" < std.math.minInt(i8)) {
-                try writer.writeByte(@enumToInt(Opcode.wide));
-                try writer.writeByte(@enumToInt(Opcode.iinc));
-                try writer.writeIntBig(u16, iinc.index);
-                try writer.writeIntBig(i16, iinc.@"const");
+                try writer.writeByte(@intFromEnum(Opcode.wide));
+                try writer.writeByte(@intFromEnum(Opcode.iinc));
+                try writer.writeInt(u16, iinc.index, .big);
+                try writer.writeInt(i16, iinc.@"const", .big);
                 return;
             } else {
-                try writer.writeByte(@enumToInt(Opcode.iinc));
-                try writer.writeByte(@intCast(u8, iinc.index));
-                try writer.writeIntBig(i8, @intCast(i8, iinc.@"const"));
+                try writer.writeByte(@intFromEnum(Opcode.iinc));
+                try writer.writeByte(@as(u8, @intCast(iinc.index)));
+                try writer.writeInt(i8, @as(i8, @intCast(iinc.@"const")), .big);
                 return;
             }
         }
 
         inline for (widenable) |op| {
-            if (@enumToInt(op) == @enumToInt(self)) {
-                var v = @field(self, @tagName(op));
+            if (@intFromEnum(op) == @intFromEnum(self)) {
+                const v = @field(self, @tagName(op));
 
                 if (v > std.math.maxInt(u8)) {
-                    try writer.writeByte(@enumToInt(Opcode.wide));
-                    try writer.writeByte(@enumToInt(self));
-                    try writer.writeIntBig(u16, v);
+                    try writer.writeByte(@intFromEnum(Opcode.wide));
+                    try writer.writeByte(@intFromEnum(self));
+                    try writer.writeInt(u16, v, .big);
                     return;
                 } else {
-                    try writer.writeByte(@enumToInt(self));
-                    try writer.writeIntBig(u8, @intCast(u8, v));
+                    try writer.writeByte(@intFromEnum(self));
+                    try writer.writeInt(u8, @as(u8, @intCast(v)), .big);
                     return;
                 }
             }
         }
 
-        try writer.writeByte(@enumToInt(self));
+        try writer.writeByte(@intFromEnum(self));
 
         inline for (std.meta.fields(Operation)) |op| {
-            if (@enumToInt(std.meta.stringToEnum(Opcode, op.name).?) == @enumToInt(self)) {
+            if (@intFromEnum(std.meta.stringToEnum(Opcode, op.name).?) == @intFromEnum(self)) {
                 switch (op.type) {
                     void => {},
                     else => switch (@typeInfo(op.type)) {
-                        .Struct => if (@hasDecl(op.type, "encode")) try @field(@field(self, op.name), "encode")(writer) else unreachable,
-                        .Enum => try writer.writeIntBig(@typeInfo(op.type).Enum.tag_type, @enumToInt(@field(self, op.name))),
-                        .Int => try writer.writeIntBig(op.type, @field(self, op.name)),
+                        .Struct => if (@hasDecl(op.type, "encode")) {
+                            try @field(self, op.name).encode(writer);
+                            //try @field(@field(self, op.name), "encode")(writer);
+                        } else unreachable,
+                        .Enum => try writer.writeInt(@typeInfo(op.type).Enum.tag_type, @intFromEnum(@field(self, op.name)), .big),
+                        .Int => try writer.writeInt(op.type, @field(self, op.name), .big),
                         else => unreachable,
                     },
                 }
@@ -709,7 +709,7 @@ test "Decode and encode opcodes including wides" {
     const ClassFile = @import("../ClassFile.zig");
     const harness = @import("../../test/harness.zig");
     var wide_fbs = harness.wide.fbs();
-    var reader = wide_fbs.reader();
+    const reader = wide_fbs.reader();
 
     var cf = try ClassFile.decode(std.testing.allocator, reader);
     defer cf.deinit();
@@ -718,7 +718,7 @@ test "Decode and encode opcodes including wides" {
         if (std.mem.eql(u8, "main", method.getName().bytes)) {
             for (method.attributes.items) |attr| {
                 if (attr == .code) {
-                    var final = try std.testing.allocator.alloc(u8, attr.code.code.items.len);
+                    const final = try std.testing.allocator.alloc(u8, attr.code.code.items.len);
                     defer std.testing.allocator.free(final);
 
                     var fbs = std.io.fixedBufferStream(attr.code.code.items);
