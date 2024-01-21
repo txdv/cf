@@ -215,7 +215,8 @@ test "Descriptors: Write/parse method that returns an object and accepts an inte
 
     var object = Descriptor{ .object = "java/lang/Object" };
 
-    var desc = Descriptor{ .method = .{ .parameters = &[_]*Descriptor{ &int, &double, &thread }, .return_type = &object } };
+    var param = [_]*Descriptor{ &int, &double, &thread };
+    var desc = Descriptor{ .method = .{ .parameters = param[0..], .return_type = &object } };
 
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();
