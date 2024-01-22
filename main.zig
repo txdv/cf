@@ -273,9 +273,9 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                     name_and_type.name_index,
                     name_and_type.descriptor_index,
                 });
-                const method_name = name_and_type.getName().bytes;
+                const method_name = escape(name_and_type.getName().bytes);
                 const descriptor = name_and_type.getDescriptor().bytes;
-                try writer.print("{s: <18} {s: <14} // \"{s}\":{s}\n", .{
+                try writer.print("{s: <18} {s: <14} // {s}:{s}\n", .{
                     name,
                     number,
                     method_name,
@@ -311,9 +311,9 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                 });
                 const class_name = method.getClassInfo().getName().bytes;
                 const name_and_type = method.getNameAndTypeInfo();
-                const method_name = name_and_type.getName().bytes;
+                const method_name = escape(name_and_type.getName().bytes);
                 const descriptor = name_and_type.getDescriptor().bytes;
-                try writer.print("// {s}.\"{s}\":{s}\n", .{
+                try writer.print("// {s}.{s}:{s}\n", .{
                     class_name,
                     method_name,
                     descriptor,
@@ -325,6 +325,14 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                 //unreachable;
             },
         }
+    }
+}
+
+fn escape(name: []u8) []const u8 {
+    if (std.mem.eql(u8, name, "<init>")) {
+        return "\"<init>\"";
+    } else {
+        return name;
     }
 }
 
