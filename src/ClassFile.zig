@@ -11,26 +11,77 @@ const ConstantPool = @import("ConstantPool.zig");
 
 const ClassFile = @This();
 
-/// Denotes access permissions to and properties of this class or interface
-pub const AccessFlags = struct {
+pub const AccessFlagsValue = enum(u16) {
+    public = 0x0001,
+    final = 0x0010,
+    super = 0x0020,
+    interface = 0x0200,
+    abstract = 0x0400,
+    synthetic = 0x1000,
+    annotation = 0x2000,
+    @"enum" = 0x4000,
+    module = 0x8000,
+};
+
+pub const AccessFlagsFields = packed struct {
     /// Declared public; may be accessed from outside its package
     public: bool = false,
+    unused1: u3 = 0,
     /// Declared final; no subclasses allowed.
     final: bool = false,
     /// Treat superclass methods specially when invoked by the invokespecial instruction
     super: bool = false,
     /// Is an interface, not a class
     interface: bool = false,
+    unused2: u3 = 0,
     /// Declared abstract; must not be instantiated
     abstract: bool = false,
     /// Declared synthetic; not present in the source code
     synthetic: bool = false,
+    unused3: u1 = 0,
     /// Declared as an annotation interface
     annotation: bool = false,
     /// Declared as an enum class
     enum_class: bool = false,
     /// Is a module, not a class or interface
     module: bool = false,
+};
+
+pub const AccessFlagsIter = struct {
+    index: usize,
+    array: []const AccessFlagsValue,
+
+    pub const values = [_]AccessFlagsValue{
+        .public,
+        .final,
+        .super,
+        .interface,
+        .abstract,
+        .synthetic,
+        .annotation,
+        .@"enum",
+        .module,
+    };
+
+    pub fn next(it: *AccessFlagsIter) ?AccessFlagsValue {
+        if (it.index >= it.array.len) return null;
+        const val = it.array[it.index];
+        it.index += 1;
+        return val;
+    }
+
+    pub fn init() AccessFlagsIter {
+        return AccessFlagsIter{
+            .index = 0,
+            .array = AccessFlagsIter.values[0..],
+        };
+    }
+};
+
+/// Denotes access permissions to and properties of this class or interface
+pub const AccessFlags = packed union {
+    value: u16,
+    flags: AccessFlagsFields,
 };
 
 // To see what the major and minor versions actually correspond to, see https://docs.oracle.com/javase/specs/jvms/se16/html/jvms-4.html#jvms-4.1-200-B.2
@@ -74,15 +125,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
 
     const access_flags_u = try reader.readInt(u16, .big);
     const access_flags = AccessFlags{
-        .public = utils.isPresent(u16, access_flags_u, 0x0001),
-        .final = utils.isPresent(u16, access_flags_u, 0x0010),
-        .super = utils.isPresent(u16, access_flags_u, 0x0020),
-        .interface = utils.isPresent(u16, access_flags_u, 0x0200),
-        .abstract = utils.isPresent(u16, access_flags_u, 0x0400),
-        .synthetic = utils.isPresent(u16, access_flags_u, 0x1000),
-        .annotation = utils.isPresent(u16, access_flags_u, 0x2000),
-        .enum_class = utils.isPresent(u16, access_flags_u, 0x4000),
-        .module = utils.isPresent(u16, access_flags_u, 0x8000),
+        .value = access_flags_u,
     };
 
     const this_class_u = try reader.readInt(u16, .big);
