@@ -1,6 +1,8 @@
 const std = @import("std");
 const MethodInfo = @import("src/MethodInfo.zig");
 const ClassFile = @import("src/ClassFile.zig");
+const AccessFlagsValue = ClassFile.AccessFlagsValue;
+const AccessFlagsIter = ClassFile.AccessFlagsIter;
 const ConstantPool = @import("src/ConstantPool.zig");
 const Entry = ConstantPool.Entry;
 const AttributeInfo = @import("src/attributes.zig").AttributeInfo;
@@ -41,11 +43,11 @@ pub fn main() !void {
     var cf = try ClassFile.decode(allocator, reader);
     defer cf.deinit();
 
-    try printSimple(cf, w);
+    try printVerbose(w, cf);
     try buf.flush();
 }
 
-fn printSimple(cf: ClassFile, writer: Writer) !void {
+fn printSimple(writer: Writer, cf: ClassFile) !void {
     try printCompiledFrom(cf, writer);
     try printClass(writer, cf);
 }
@@ -186,6 +188,142 @@ fn printExceptions(writer: Writer, cp: *ConstantPool, methodInfo: MethodInfo) !v
                 }
             },
             else => {},
+        }
+    }
+}
+
+fn printVerbose(writer: Writer, cf: ClassFile) !void {
+    try printHeader(writer, cf);
+    try printConstantPool(writer, cf);
+    try printFooter(writer, cf);
+}
+
+fn flagName(flag: AccessFlagsValue) []const u8 {
+    return switch (flag) {
+        .public => "ACC_PUBLIC",
+        .super => "ACC_SUPER",
+        else => unreachable,
+    };
+}
+
+fn printHeader(writer: Writer, cf: ClassFile) !void {
+    try writer.print("Classfile ...\n", .{});
+    try writer.print("Compiled from \"{s}\"\n", .{"file"});
+    const className = readString(cf.constant_pool, cf.this_class);
+    try writer.print("public class {s}\n", .{className});
+
+    //std.fmt.format("AS");
+
+    try writer.print("  minor_version: {}\n", .{cf.minor_version});
+    try writer.print("  major_version: {}\n", .{cf.major_version});
+    try writer.print("  flags: (0x{X:0>4})", .{cf.access_flags.value});
+    var flags = AccessFlagsIter.init();
+    while (flags.next()) |flag| {
+        const flag_value = @intFromEnum(flag);
+        if (cf.access_flags.value & flag_value == flag_value) {
+            try writer.print(" {s}", .{flagName(flag)});
+        }
+    }
+
+    try writer.print("\n", .{});
+    try writer.print("  this_class: #{}\n", .{cf.this_class});
+    if (cf.super_class) |super_class| {
+        try writer.print("  super_class: #{}\n", .{super_class});
+    }
+    try writer.print("  interfaces: {}, fields: {}, methods {}, attributes: {}\n", .{
+        cf.interfaces.items.len,
+        cf.fields.items.len,
+        cf.methods.items.len,
+        cf.attributes.items.len,
+    });
+}
+
+fn printFooter(writer: Writer, cf: ClassFile) !void {
+    for (cf.attributes.items) |attribute| {
+        switch (attribute) {
+            .source_file => |source_file| {
+                const index = source_file.source_file_index;
+                const name = readString(cf.constant_pool, index - 1);
+                try writer.print("SourceFile: \"{s}\"\n", .{name});
+            },
+            else => {},
+        }
+    }
+}
+
+fn printConstantPool(writer: Writer, cf: ClassFile) !void {
+    try writer.print("Constant pool:\n", .{});
+    var buffer: [100]u8 = undefined;
+    for (cf.constant_pool.entries.items, 1..) |constant, i| {
+        const is = try std.fmt.bufPrint(buffer[0..], "#{}", .{i});
+        try writer.print("{s:5} = ", .{is});
+        switch (constant) {
+            Entry.class => |class| {
+                const name = "Class";
+                const number = try std.fmt.bufPrint(buffer[0..], "#{}", .{class.name_index});
+                try writer.print("{s: <18} {s: <14} // {s}\n", .{
+                    name,
+                    number,
+                    class.getName().bytes,
+                });
+            },
+            Entry.name_and_type => |name_and_type| {
+                const name = "NameAndType";
+                const number = try std.fmt.bufPrint(buffer[0..], "#{}.{}", .{
+                    name_and_type.name_index,
+                    name_and_type.descriptor_index,
+                });
+                const method_name = name_and_type.getName().bytes;
+                const descriptor = name_and_type.getDescriptor().bytes;
+                try writer.print("{s: <18} {s: <14} // \"{s}\":{s}\n", .{
+                    name,
+                    number,
+                    method_name,
+                    descriptor,
+                });
+            },
+            Entry.utf8 => |utf8| {
+                const name = "Utf8";
+                try writer.print("{s: <18} {s}\n", .{
+                    name,
+                    utf8.bytes,
+                });
+            },
+            Entry.string => |string| {
+                const string_value = readString(cf.constant_pool, string.string_index - 1);
+                const name = "String";
+                const number = try std.fmt.bufPrint(buffer[0..], "#{}", .{string.string_index});
+                try writer.print("{s: <18} {s: <14} // {s}\n", .{
+                    name,
+                    number,
+                    string_value,
+                });
+            },
+            Entry.methodref => |method| {
+                const name = "Methodref";
+                const number = try std.fmt.bufPrint(buffer[0..], "#{}.{}", .{
+                    method.class_index,
+                    method.name_and_type_index,
+                });
+                try writer.print("{s: <18} {s: <14} ", .{
+                    name,
+                    number,
+                });
+                const class_name = method.getClassInfo().getName().bytes;
+                const name_and_type = method.getNameAndTypeInfo();
+                const method_name = name_and_type.getName().bytes;
+                const descriptor = name_and_type.getDescriptor().bytes;
+                try writer.print("// {s}.\"{s}\":{s}\n", .{
+                    class_name,
+                    method_name,
+                    descriptor,
+                });
+            },
+            else => {
+                try writer.print("{}\n", .{constant});
+                //std.debug.print("{}", .{constant});
+                //unreachable;
+            },
         }
     }
 }
