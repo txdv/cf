@@ -5,12 +5,17 @@ const AccessFlagsValue = ClassFile.AccessFlagsValue;
 const AccessFlagsIter = ClassFile.AccessFlagsIter;
 const ConstantPool = @import("src/ConstantPool.zig");
 const Entry = ConstantPool.Entry;
-const AttributeInfo = @import("src/attributes.zig").AttributeInfo;
+const attributes = @import("src/attributes.zig");
+const AttributeInfo = attributes.AttributeInfo;
+const ExceptionsAttribute = attributes.ExceptionsAttribute;
+const CodeAttribute = attributes.CodeAttribute;
 const Writer = std.io.BufferedWriter(4096, std.fs.File.Writer).Writer;
+const ops = @import("src/bytecode/ops.zig");
+const Operation = ops.Operation;
 
 const Allocator = std.mem.Allocator;
 
-pub fn readFile(allocator: std.mem.Allocator, filename: []u8) ![]u8 {
+pub fn readFile(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
     var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     const path = try std.fs.realpath(filename, &path_buffer);
 
@@ -20,21 +25,25 @@ pub fn readFile(allocator: std.mem.Allocator, filename: []u8) ![]u8 {
     return bytes;
 }
 
-pub fn main() !void {
-    const out = std.io.getStdOut().writer();
-    var buf = std.io.bufferedWriter(out);
-    var w = buf.writer();
-
+pub fn getFilename() []const u8 {
     if (std.os.argv.len < 2) {
-        try w.print("Specify a file\n", .{});
-
+        _ = std.io.getStdErr().writer().print("Specify a file\n", .{}) catch {};
         unreachable;
         //return error.FileNotFound;
     }
     const filename = std.os.argv[1];
     const filename_length = std.mem.len(filename);
+    return filename[0..filename_length];
+}
+
+pub fn main() !void {
+    const out = std.io.getStdOut().writer();
+    var buf = std.io.bufferedWriter(out);
+    const w = buf.writer();
+
+    const filename = getFilename();
     const allocator = std.heap.page_allocator;
-    const data = try readFile(allocator, filename[0..filename_length]);
+    const data = try readFile(allocator, filename);
     defer allocator.free(data);
 
     var stream = std.io.fixedBufferStream(data);
@@ -81,24 +90,29 @@ fn readString(cp: *ConstantPool, index: u16) []u8 {
 }
 
 fn printClass(writer: Writer, cf: ClassFile) !void {
-    const className = readString(cf.constant_pool, cf.this_class);
-    try writer.print("public class {s} {{\n", .{className});
+    const class_name = readString(cf.constant_pool, cf.this_class);
+    try writer.print("public class {s} {{\n", .{class_name});
     for (cf.methods.items) |method| {
-        var name = method.getName().bytes;
-        const is_constructor = std.mem.eql(u8, name, "<init>");
-        if (is_constructor) {
-            name = className;
-        }
-        try printModifiers(writer, method);
-        const descriptor = method.getDescriptor().bytes;
-        if (!is_constructor)
-            try printReturnType(writer, descriptor);
-        try writer.print("{s}", .{name});
-        try printArguments(writer, descriptor);
-        try printExceptions(writer, cf.constant_pool, method);
-        try writer.print(";\n", .{});
+        printMethod(writer, class_name, method);
     }
     try writer.print("}}\n", .{});
+}
+
+fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
+    const class_name = readString(cf.constant_pool, cf.this_class);
+    var name = method.getName().bytes;
+    const is_constructor = std.mem.eql(u8, name, "<init>");
+    if (is_constructor) {
+        name = class_name;
+    }
+    try printModifiers(writer, method);
+    const descriptor = method.getDescriptor().bytes;
+    if (!is_constructor)
+        try printReturnType(writer, descriptor);
+    try writer.print("{s}", .{name});
+    try printArguments(writer, descriptor);
+    try printExceptions(writer, cf.constant_pool, method);
+    try writer.print(";\n", .{});
 }
 
 fn printModifiers(writer: Writer, method: MethodInfo) !void {
@@ -157,6 +171,25 @@ fn printArguments(writer: Writer, descriptor: []const u8) !void {
     try writer.print(")", .{});
 }
 
+fn argumentsCount(descriptor: []const u8) u32 {
+    var args_count: u32 = 0;
+    var i: usize = descriptor.len - 2;
+    while (i > 0 and descriptor[i] != '(') {
+        if (descriptor[i] == ';') {
+            const end = i;
+            while (descriptor[i] != 'L') {
+                i -= 1;
+            }
+            const start = i + 1;
+            const name = descriptor[start..end];
+            _ = name;
+            args_count += 1;
+        }
+        i -= 1;
+    }
+    return args_count;
+}
+
 fn printWithNamespace(writer: Writer, name: []const u8) !void {
     var i: usize = 0;
     var start = i;
@@ -192,10 +225,217 @@ fn printExceptions(writer: Writer, cp: *ConstantPool, methodInfo: MethodInfo) !v
     }
 }
 
+fn printMethodExceptions(writer: Writer, cp: *ConstantPool, exceptions: ExceptionsAttribute) !void {
+    const len = exceptions.exception_index_table.items.len;
+    if (len > 0) {
+        try writer.print(" throws ", .{});
+    }
+
+    for (exceptions.exception_index_table.items, 0..) |exception, i| {
+        const exception_string = readString(cp, exception);
+        try printWithNamespace(writer, exception_string);
+        if (i < len - 1) {
+            try writer.print(", ", .{});
+        }
+    }
+}
+
 fn printVerbose(writer: Writer, cf: ClassFile) !void {
     try printHeader(writer, cf);
     try printConstantPool(writer, cf);
+    try writer.print("{{\n", .{});
+    for (cf.methods.items) |method| {
+        try printMethod(writer, cf, method);
+        try printMethodDetailed(writer, cf, method);
+    }
+    try writer.print("}}\n", .{});
     try printFooter(writer, cf);
+}
+
+fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
+    try writer.print("    descriptor: {s}\n", .{method.getDescriptor().bytes});
+    try writer.print("    flags: {s}\n", .{"TODO:"});
+    for (method.attributes.items) |attribute| {
+        //try writer.print("{s}\n", .{@tagName(attribute)});
+        switch (attribute) {
+            .code => |code| {
+                try writer.print("      stack={}, locals={}, args_size={}\n", .{
+                    code.max_stack,
+                    code.max_locals,
+                    argumentsCount(method.getDescriptor().bytes),
+                });
+
+                try printMethodCode(writer, code);
+
+                for (code.attributes.items) |method_attribute| {
+                    switch (method_attribute) {
+                        .line_number_table => |line_number_table_attribute| {
+                            try writer.print("      LineNumberTable:\n", .{});
+                            for (line_number_table_attribute.line_number_table.items) |line_number_entry| {
+                                try writer.print("        line {}: {}\n", .{
+                                    line_number_entry.line_number,
+                                    line_number_entry.start_pc,
+                                });
+                            }
+                        },
+                        else => {},
+                    }
+                }
+            },
+            .exceptions => |exceptions| {
+                try writer.print("    Exceptions:\n     ", .{});
+                try printMethodExceptions(writer, cf.constant_pool, exceptions);
+                try writer.print("\n", .{});
+            },
+            else => {},
+        }
+    }
+}
+
+pub const OpType = enum {
+    bi_push_params,
+    si_push_params,
+    ldc,
+    constant_pool_ref,
+    local_index_operation,
+    iinc,
+    branch,
+    branch_wide,
+    empty,
+};
+
+pub const OperationType = union(OpType) {
+    bi_push_params: ops.BipushParams,
+    si_push_params: ops.SipushParams,
+    ldc: u8,
+    constant_pool_ref: ops.ConstantPoolRefOperation,
+    local_index_operation: ops.LocalIndexOperation,
+    iinc: ops.IincParams,
+    branch: ops.BranchToOffsetOperation,
+    branch_wide: ops.BranchToOffsetWideOperation,
+    empty: u0,
+
+    pub fn fromOperation(op: Operation) OperationType {
+        switch (op) {
+            .bipush => |bipush| {
+                return OperationType{ .bi_push_params = bipush };
+            },
+            .sipush => |sipush| {
+                return OperationType{ .si_push_params = sipush };
+            },
+            .ldc => |ldc| {
+                return OperationType{ .ldc = ldc };
+            },
+            .ldc_w,
+            .ldc2_w,
+            .getstatic,
+            .putstatic,
+            .getfield,
+            .putfield,
+            .invokevirtual,
+            .invokespecial,
+            .invokestatic,
+            .new,
+            .anewarray,
+            .checkcast,
+            .instanceof,
+            => |constant_pool_ref| {
+                return OperationType{ .constant_pool_ref = constant_pool_ref };
+            },
+            .iload,
+            .lload,
+            .fload,
+            .dload,
+            .aload,
+            .istore,
+            .lstore,
+            .fstore,
+            .dstore,
+            .astore,
+            => |local_index_operation| {
+                return OperationType{ .local_index_operation = local_index_operation };
+            },
+            .iinc => |iinc| {
+                return OperationType{ .iinc = iinc };
+            },
+            .ifeq,
+            .ifne,
+            .iflt,
+            .ifge,
+            .ifgt,
+            .ifle,
+            .if_icmpeq,
+            .if_icmpne,
+            .if_icmplt,
+            .if_icmpge,
+            .if_icmpgt,
+            .if_icmple,
+            .if_acmpeq,
+            .if_acmpne,
+            .goto,
+            .jsr,
+            .ifnull,
+            .ifnonnull,
+            => |branch| {
+                return OperationType{ .branch = branch };
+            },
+            .goto_w,
+            .jsr_w,
+            => |branch_wide| {
+                return OperationType{ .branch_wide = branch_wide };
+            },
+            .tableswitch => unreachable,
+            .lookupswitch => unreachable,
+            .invokeinterface => unreachable,
+            .invokedynamic => unreachable,
+            .newarray => unreachable,
+            .multianewarray => unreachable,
+            else => return OperationType{ .empty = 0 },
+        }
+    }
+};
+
+fn printMethodCode(writer: Writer, code_attribute: CodeAttribute) !void {
+    var fbs = std.io.fixedBufferStream(code_attribute.code.items);
+    const reader = fbs.reader();
+
+    const allocator = std.heap.page_allocator;
+    while (true) {
+        const op = Operation.decode(allocator, reader) catch |err| {
+            if (err == error.EndOfStream) {
+                break;
+            } else {
+                return err;
+            }
+        };
+        try writer.print("{: >10}: {s: <14}", .{
+            0,
+            @tagName(op),
+        });
+
+        switch (OperationType.fromOperation(op)) {
+            .bi_push_params => |bi_push_params| {
+                try writer.print("#{}", .{
+                    bi_push_params,
+                });
+            },
+            .local_index_operation => |local_index| {
+                try writer.print("#{}", .{
+                    local_index,
+                });
+            },
+            .constant_pool_ref => |pool_ref| {
+                try writer.print("#{}", .{
+                    pool_ref,
+                });
+            },
+            else => {},
+        }
+
+        //try writer.print("{}", .{@field(op, @tagName(op))});
+
+        try writer.print("\n", .{});
+    }
 }
 
 fn flagName(flag: AccessFlagsValue) []const u8 {
@@ -211,9 +451,6 @@ fn printHeader(writer: Writer, cf: ClassFile) !void {
     try writer.print("Compiled from \"{s}\"\n", .{"file"});
     const className = readString(cf.constant_pool, cf.this_class);
     try writer.print("public class {s}\n", .{className});
-
-    //std.fmt.format("AS");
-
     try writer.print("  minor_version: {}\n", .{cf.minor_version});
     try writer.print("  major_version: {}\n", .{cf.major_version});
     try writer.print("  flags: (0x{X:0>4})", .{cf.access_flags.value});
