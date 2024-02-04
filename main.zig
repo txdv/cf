@@ -273,7 +273,7 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
         //try writer.print("{s}\n", .{@tagName(attribute)});
         switch (attribute) {
             .code => |code| {
-                try writer.print("      stack={}, locals={}, args_size={}\n", .{
+                try writer.print("    Code:\n      stack={}, locals={}, args_size={}\n", .{
                     code.max_stack,
                     code.max_locals,
                     argumentsCount(method.getDescriptor().bytes),
@@ -433,6 +433,7 @@ fn printMethodCode(writer: Writer, code_attribute: CodeAttribute) !void {
     const reader = fbs.reader();
 
     const allocator = std.heap.page_allocator;
+    var offset: usize = 0;
     while (true) {
         const op = Operation.decode(allocator, reader) catch |err| {
             if (err == error.EndOfStream) {
@@ -442,9 +443,11 @@ fn printMethodCode(writer: Writer, code_attribute: CodeAttribute) !void {
             }
         };
         try writer.print("{: >10}: {s: <14}", .{
-            0,
+            offset,
             @tagName(op),
         });
+
+        offset += op.sizeOf();
 
         switch (OperationType.fromOperation(op)) {
             .bi_push_params => |bi_push_params| {
