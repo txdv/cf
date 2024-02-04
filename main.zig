@@ -578,7 +578,7 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
         const is = try std.fmt.bufPrint(buffer[0..], "#{}", .{i});
         try writer.print("{s:5} = ", .{is});
         switch (constant) {
-            Entry.class => |class| {
+            .class => |class| {
                 const name = "Class";
                 const number = try std.fmt.bufPrint(buffer[0..], "#{}", .{class.name_index});
                 try writer.print("{s: <18} {s: <14} // {s}\n", .{
@@ -587,7 +587,7 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                     class.getName().bytes,
                 });
             },
-            Entry.name_and_type => |name_and_type| {
+            .name_and_type => |name_and_type| {
                 const name = "NameAndType";
                 const number = try std.fmt.bufPrint(buffer[0..], "#{}.{}", .{
                     name_and_type.name_index,
@@ -602,7 +602,7 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                     descriptor,
                 });
             },
-            Entry.utf8 => |utf8| {
+            .utf8 => |utf8| {
                 const name = "Utf8";
                 try writer.print("{s: <18} ", .{
                     name,
@@ -610,7 +610,7 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                 try print_string(writer, utf8.bytes);
                 try writer.print("\n", .{});
             },
-            Entry.string => |string| {
+            .string => |string| {
                 const string_value = readString(cf.constant_pool, string.string_index - 1);
                 const name = "String";
                 const number = try std.fmt.bufPrint(buffer[0..], "#{}", .{string.string_index});
@@ -620,10 +620,10 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                     string_value,
                 });
             },
-            Entry.methodref => |method| {
+            .methodref => |method| {
                 try print_ref(writer, "Methodref", method);
             },
-            Entry.fieldref => |fieldref| {
+            .fieldref => |fieldref| {
                 try print_ref(writer, "Fieldref", fieldref);
             },
             else => unreachable,
