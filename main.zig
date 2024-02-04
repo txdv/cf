@@ -4,6 +4,7 @@ const ClassFile = @import("src/ClassFile.zig");
 const AccessFlagsValue = ClassFile.AccessFlagsValue;
 const AccessFlagsIter = ClassFile.AccessFlagsIter;
 const ConstantPool = @import("src/ConstantPool.zig");
+const RefInfo = ConstantPool.RefInfo;
 const Entry = ConstantPool.Entry;
 const attributes = @import("src/attributes.zig");
 const AttributeInfo = attributes.AttributeInfo;
@@ -21,7 +22,9 @@ pub fn readFile(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
 
     const file = try std.fs.openFileAbsolute(path, .{});
 
-    const bytes = try file.readToEndAlloc(allocator, 4096);
+    const max_bytes = 1024 * 4096 * 4095;
+
+    const bytes = try file.readToEndAlloc(allocator, max_bytes);
     return bytes;
 }
 
@@ -442,7 +445,13 @@ fn flagName(flag: AccessFlagsValue) []const u8 {
     return switch (flag) {
         .public => "ACC_PUBLIC",
         .super => "ACC_SUPER",
-        else => unreachable,
+        .final => "ACC_FINAL",
+        .interface => "ACC_INTERFACE",
+        .abstract => "ACC_ABSTRACT",
+        .synthetic => "ACC_SYNTHETIC",
+        .annotation => "ACC_ANNOTATION",
+        .@"enum" => "ACC_ENUM",
+        .module => "ACC_MODULE",
     };
 }
 
@@ -521,10 +530,11 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
             },
             Entry.utf8 => |utf8| {
                 const name = "Utf8";
-                try writer.print("{s: <18} {s}\n", .{
+                try writer.print("{s: <18} ", .{
                     name,
-                    utf8.bytes,
                 });
+                try print_string(writer, utf8.bytes);
+                try writer.print("\n", .{});
             },
             Entry.string => |string| {
                 const string_value = readString(cf.constant_pool, string.string_index - 1);
@@ -537,32 +547,65 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                 });
             },
             Entry.methodref => |method| {
-                const name = "Methodref";
-                const number = try std.fmt.bufPrint(buffer[0..], "#{}.{}", .{
-                    method.class_index,
-                    method.name_and_type_index,
-                });
-                try writer.print("{s: <18} {s: <14} ", .{
-                    name,
-                    number,
-                });
-                const class_name = method.getClassInfo().getName().bytes;
-                const name_and_type = method.getNameAndTypeInfo();
-                const method_name = escape(name_and_type.getName().bytes);
-                const descriptor = name_and_type.getDescriptor().bytes;
-                try writer.print("// {s}.{s}:{s}\n", .{
-                    class_name,
-                    method_name,
-                    descriptor,
-                });
+                try print_ref(writer, "Methodref", method);
+            },
+            Entry.fieldref => |fieldref| {
+                try print_ref(writer, "Fieldref", fieldref);
             },
             else => {
                 try writer.print("{}\n", .{constant});
-                //std.debug.print("{}", .{constant});
+                //std.debug.print("{}\n", .{constant});
                 //unreachable;
             },
         }
     }
+}
+
+fn print_string(writer: Writer, string: []const u8) !void {
+    var i: usize = 0;
+    while (i < string.len) {
+        const byte = string[i];
+        switch (byte) {
+            '\t' => try writer.print("\\t", .{}),
+            '\n' => try writer.print("\\n", .{}),
+            '\r' => try writer.print("\\r", .{}),
+            8 => try writer.print("\\b", .{}),
+            12 => try writer.print("\\f", .{}),
+            '"' => try writer.print("\\\"", .{}),
+            '\'' => try writer.print("\\'", .{}),
+            '\\' => try writer.print("\\\\", .{}),
+            else => {
+                if (byte >= 32 and byte < 127) {
+                    try writer.print("{c}", .{byte});
+                } else {
+                    try writer.print("\\u00{x:0>2}", .{byte});
+                }
+            },
+        }
+        i += 1;
+    }
+}
+
+fn print_ref(writer: Writer, name: []const u8, ref: RefInfo) !void {
+    var buffer: [100]u8 = undefined;
+
+    const number = try std.fmt.bufPrint(buffer[0..], "#{}.{}", .{
+        ref.class_index,
+        ref.name_and_type_index,
+    });
+    try writer.print("{s: <18} {s: <14} ", .{
+        name,
+        number,
+    });
+    const class_name = ref.getClassInfo().getName().bytes;
+    const name_and_type = ref.getNameAndTypeInfo();
+    const method_name = escape(name_and_type.getName().bytes);
+    const descriptor = name_and_type.getDescriptor().bytes;
+    try writer.print("// {s}.{s}:{s}\n", .{
+        class_name,
+        method_name,
+        descriptor,
+    });
 }
 
 fn escape(name: []u8) []const u8 {
