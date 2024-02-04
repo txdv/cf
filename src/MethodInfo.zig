@@ -5,7 +5,39 @@ const ConstantPool = @import("ConstantPool.zig");
 
 const MethodInfo = @This();
 
-pub const AccessFlags = struct {
+pub const AccessFlagsValue = enum(u16) {
+    public = 0x0001,
+    private = 0x0002,
+    protected = 0x004,
+    static = 0x0008,
+    final = 0x0010,
+    synchronized = 0x0020,
+    bridge = 0x040,
+    varargs = 0x0080,
+    native = 0x0100,
+    abstract = 0x0400,
+    strict = 0x0800,
+    synthetic = 0x1000,
+
+    pub fn name(flag: AccessFlagsValue) []const u8 {
+        return switch (flag) {
+            .public => "ACC_PUBLIC",
+            .private => "ACC_PRIVATE",
+            .protected => "ACC_PROTECTED",
+            .static => "ACC_STATIC",
+            .final => "ACC_FINAL",
+            .synchronized => "ACC_SYNCHRONIZED",
+            .bridge => "ACC_BRIDGE",
+            .varargs => "ACC_VARARGS",
+            .native => "ACC_NATIVE",
+            .abstract => "ACC_ABSTRACT",
+            .strict => "ACC_STRICT",
+            .synthetic => "ACC_SYNTHETIC",
+        };
+    }
+};
+
+pub const AccessFlagsFields = packed struct {
     public: bool = false,
     private: bool = false,
     protected: bool = false,
@@ -18,6 +50,19 @@ pub const AccessFlags = struct {
     abstract: bool = false,
     strict: bool = false,
     synthetic: bool = false,
+};
+
+const AccessFlagsIter = utils.EnumIter(AccessFlagsValue);
+
+pub const AccessFlags = packed union {
+    value: u16,
+    flags: AccessFlagsFields,
+
+    pub fn iter(it: AccessFlags) AccessFlagsIter {
+        return AccessFlagsIter{
+            .value = it.value,
+        };
+    }
 };
 
 constant_pool: *ConstantPool,
@@ -60,21 +105,7 @@ pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader
 
     return MethodInfo{
         .constant_pool = constant_pool,
-
-        .access_flags = .{
-            .public = utils.isPresent(u16, access_flags_u, 0x0001),
-            .private = utils.isPresent(u16, access_flags_u, 0x0002),
-            .protected = utils.isPresent(u16, access_flags_u, 0x0004),
-            .static = utils.isPresent(u16, access_flags_u, 0x0008),
-            .final = utils.isPresent(u16, access_flags_u, 0x0010),
-            .synchronized = utils.isPresent(u16, access_flags_u, 0x0020),
-            .bridge = utils.isPresent(u16, access_flags_u, 0x0040),
-            .varargs = utils.isPresent(u16, access_flags_u, 0x0080),
-            .native = utils.isPresent(u16, access_flags_u, 0x0100),
-            .abstract = utils.isPresent(u16, access_flags_u, 0x0400),
-            .strict = utils.isPresent(u16, access_flags_u, 0x0800),
-            .synthetic = utils.isPresent(u16, access_flags_u, 0x1000),
-        },
+        .access_flags = AccessFlags{ .value = access_flags_u },
         .name_index = name_index,
         .descriptor_index = descriptor_index,
         .attributes = attributess,
@@ -82,20 +113,7 @@ pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader
 }
 
 pub fn encode(self: MethodInfo, writer: anytype) !void {
-    var access_flags_u: u16 = 0;
-    if (self.access_flags.public) utils.setPresent(u16, &access_flags_u, 0x0001);
-    if (self.access_flags.private) utils.setPresent(u16, &access_flags_u, 0x0002);
-    if (self.access_flags.protected) utils.setPresent(u16, &access_flags_u, 0x0004);
-    if (self.access_flags.static) utils.setPresent(u16, &access_flags_u, 0x0008);
-    if (self.access_flags.final) utils.setPresent(u16, &access_flags_u, 0x0010);
-    if (self.access_flags.synchronized) utils.setPresent(u16, &access_flags_u, 0x0020);
-    if (self.access_flags.bridge) utils.setPresent(u16, &access_flags_u, 0x0040);
-    if (self.access_flags.varargs) utils.setPresent(u16, &access_flags_u, 0x0080);
-    if (self.access_flags.native) utils.setPresent(u16, &access_flags_u, 0x0100);
-    if (self.access_flags.abstract) utils.setPresent(u16, &access_flags_u, 0x0400);
-    if (self.access_flags.strict) utils.setPresent(u16, &access_flags_u, 0x0800);
-    if (self.access_flags.synthetic) utils.setPresent(u16, &access_flags_u, 0x1000);
-    try writer.writeInt(u16, access_flags_u, .big);
+    try writer.writeInt(u16, self.access_flags.value, .big);
 
     try writer.writeInt(u16, self.name_index, .big);
     try writer.writeInt(u16, self.descriptor_index, .big);

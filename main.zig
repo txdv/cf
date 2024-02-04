@@ -2,7 +2,6 @@ const std = @import("std");
 const MethodInfo = @import("src/MethodInfo.zig");
 const ClassFile = @import("src/ClassFile.zig");
 const AccessFlagsValue = ClassFile.AccessFlagsValue;
-const AccessFlagsIter = ClassFile.AccessFlagsIter;
 const ConstantPool = @import("src/ConstantPool.zig");
 const RefInfo = ConstantPool.RefInfo;
 const Entry = ConstantPool.Entry;
@@ -120,19 +119,19 @@ fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
 
 fn printModifiers(writer: Writer, method: MethodInfo) !void {
     try writer.print("  ", .{});
-    if (method.access_flags.public) {
+    if (method.access_flags.flags.public) {
         try writer.print("public ", .{});
     }
-    if (method.access_flags.private) {
+    if (method.access_flags.flags.private) {
         try writer.print("private ", .{});
     }
-    if (method.access_flags.protected) {
+    if (method.access_flags.flags.protected) {
         try writer.print("protected ", .{});
     }
-    if (method.access_flags.static) {
+    if (method.access_flags.flags.static) {
         try writer.print("static ", .{});
     }
-    if (method.access_flags.final) {
+    if (method.access_flags.flags.final) {
         try writer.print("final ", .{});
     }
 }
@@ -257,7 +256,19 @@ fn printVerbose(writer: Writer, cf: ClassFile) !void {
 
 fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
     try writer.print("    descriptor: {s}\n", .{method.getDescriptor().bytes});
-    try writer.print("    flags: {s}\n", .{"TODO:"});
+    try writer.print("    flags (0x{X:0>4}): ", .{
+        method.access_flags.value,
+    });
+
+    var iter = method.access_flags.iter();
+    while (iter.next()) |flag| {
+        if (iter.index > 1) {
+            try writer.print(", ", .{});
+        }
+        try writer.print("{s}", .{flag.name()});
+    }
+    try writer.print("\n", .{});
+
     for (method.attributes.items) |attribute| {
         //try writer.print("{s}\n", .{@tagName(attribute)});
         switch (attribute) {
@@ -441,20 +452,6 @@ fn printMethodCode(writer: Writer, code_attribute: CodeAttribute) !void {
     }
 }
 
-fn flagName(flag: AccessFlagsValue) []const u8 {
-    return switch (flag) {
-        .public => "ACC_PUBLIC",
-        .super => "ACC_SUPER",
-        .final => "ACC_FINAL",
-        .interface => "ACC_INTERFACE",
-        .abstract => "ACC_ABSTRACT",
-        .synthetic => "ACC_SYNTHETIC",
-        .annotation => "ACC_ANNOTATION",
-        .@"enum" => "ACC_ENUM",
-        .module => "ACC_MODULE",
-    };
-}
-
 fn printHeader(writer: Writer, cf: ClassFile) !void {
     try writer.print("Classfile ...\n", .{});
     try writer.print("Compiled from \"{s}\"\n", .{"file"});
@@ -463,12 +460,13 @@ fn printHeader(writer: Writer, cf: ClassFile) !void {
     try writer.print("  minor_version: {}\n", .{cf.minor_version});
     try writer.print("  major_version: {}\n", .{cf.major_version});
     try writer.print("  flags: (0x{X:0>4})", .{cf.access_flags.value});
-    var flags = AccessFlagsIter.init();
-    while (flags.next()) |flag| {
-        const flag_value = @intFromEnum(flag);
-        if (cf.access_flags.value & flag_value == flag_value) {
-            try writer.print(" {s}", .{flagName(flag)});
+
+    var flags_iter = cf.access_flags.iter();
+    while (flags_iter.next()) |flag| {
+        if (flags_iter.index > 1) {
+            try writer.print(", ", .{});
         }
+        try writer.print(" {s}", .{flag.name()});
     }
 
     try writer.print("\n", .{});

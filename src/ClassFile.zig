@@ -21,6 +21,20 @@ pub const AccessFlagsValue = enum(u16) {
     annotation = 0x2000,
     @"enum" = 0x4000,
     module = 0x8000,
+
+    pub fn name(flag: AccessFlagsValue) []const u8 {
+        return switch (flag) {
+            .public => "ACC_PUBLIC",
+            .super => "ACC_SUPER",
+            .final => "ACC_FINAL",
+            .interface => "ACC_INTERFACE",
+            .abstract => "ACC_ABSTRACT",
+            .synthetic => "ACC_SYNTHETIC",
+            .annotation => "ACC_ANNOTATION",
+            .@"enum" => "ACC_ENUM",
+            .module => "ACC_MODULE",
+        };
+    }
 };
 
 pub const AccessFlagsFields = packed struct {
@@ -47,41 +61,17 @@ pub const AccessFlagsFields = packed struct {
     module: bool = false,
 };
 
-pub const AccessFlagsIter = struct {
-    index: usize,
-    array: []const AccessFlagsValue,
-
-    pub const values = [_]AccessFlagsValue{
-        .public,
-        .final,
-        .super,
-        .interface,
-        .abstract,
-        .synthetic,
-        .annotation,
-        .@"enum",
-        .module,
-    };
-
-    pub fn next(it: *AccessFlagsIter) ?AccessFlagsValue {
-        if (it.index >= it.array.len) return null;
-        const val = it.array[it.index];
-        it.index += 1;
-        return val;
-    }
-
-    pub fn init() AccessFlagsIter {
-        return AccessFlagsIter{
-            .index = 0,
-            .array = AccessFlagsIter.values[0..],
-        };
-    }
-};
+const AccessFlagsIter = utils.EnumIter(AccessFlagsValue);
 
 /// Denotes access permissions to and properties of this class or interface
 pub const AccessFlags = packed union {
     value: u16,
     flags: AccessFlagsFields,
+    pub fn iter(it: AccessFlags) AccessFlagsIter {
+        return AccessFlagsIter{
+            .value = it.value,
+        };
+    }
 };
 
 // To see what the major and minor versions actually correspond to, see https://docs.oracle.com/javase/specs/jvms/se16/html/jvms-4.html#jvms-4.1-200-B.2
