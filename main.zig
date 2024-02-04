@@ -270,7 +270,6 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
     try writer.print("\n", .{});
 
     for (method.attributes.items) |attribute| {
-        //try writer.print("{s}\n", .{@tagName(attribute)});
         switch (attribute) {
             .code => |code| {
                 try writer.print("    Code:\n      stack={}, locals={}, args_size={}\n", .{
@@ -279,7 +278,7 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
                     argumentsCount(method.getDescriptor().bytes),
                 });
 
-                try printMethodCode(writer, code);
+                try printMethodCode(writer, code, cf);
 
                 for (code.attributes.items) |method_attribute| {
                     switch (method_attribute) {
@@ -428,7 +427,7 @@ pub const OperationType = union(OpType) {
     }
 };
 
-fn printMethodCode(writer: Writer, code_attribute: CodeAttribute) !void {
+fn printMethodCode(writer: Writer, code_attribute: CodeAttribute, cf: ClassFile) !void {
     var fbs = std.io.fixedBufferStream(code_attribute.code.items);
     const reader = fbs.reader();
 
@@ -461,16 +460,65 @@ fn printMethodCode(writer: Writer, code_attribute: CodeAttribute) !void {
                 });
             },
             .constant_pool_ref => |pool_ref| {
-                try writer.print("#{}", .{
+                try writer.print("#{: <18} // ", .{
                     pool_ref,
                 });
+
+                try printDetailed(writer, cf, cf.constant_pool.get(pool_ref));
             },
             else => {},
         }
 
-        //try writer.print("{}", .{@field(op, @tagName(op))});
-
         try writer.print("\n", .{});
+    }
+}
+
+fn printDetailed(writer: Writer, cf: ClassFile, constant: Entry) !void {
+    switch (constant) {
+        .fieldref => |fieldref| {
+            try writer.print("Field ", .{});
+
+            try printDetailed(
+                writer,
+                cf,
+                fieldref.constant_pool.get(fieldref.class_index),
+            );
+            try writer.print(".", .{});
+
+            try printDetailed(
+                writer,
+                cf,
+                fieldref.constant_pool.get(fieldref.name_and_type_index),
+            );
+        },
+        .methodref => |methodref| {
+            try writer.print("Method ", .{});
+            try printDetailed(
+                writer,
+                cf,
+                methodref.constant_pool.get(methodref.class_index),
+            );
+            try writer.print(".", .{});
+
+            try printDetailed(
+                writer,
+                cf,
+                methodref.constant_pool.get(methodref.name_and_type_index),
+            );
+        },
+        .class => |class_info| {
+            try writer.print("{s}", .{class_info.getName().bytes});
+        },
+        .name_and_type => |name_and_type| {
+            try writer.print("{s}:{s}", .{
+                name_and_type.getName().bytes,
+                name_and_type.getDescriptor().bytes,
+            });
+        },
+        else => {
+            std.debug.print("{any}", .{constant});
+            unreachable;
+        },
     }
 }
 
