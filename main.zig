@@ -301,7 +301,26 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
                 try printMethodExceptions(writer, cf.constant_pool, exceptions);
                 try writer.print("\n", .{});
             },
-            else => {},
+            .methodParameters => |method_parameters| {
+                try writer.print("    MethodParameters:\n", .{});
+                try writer.print("      {s: <30} {s}\n", .{ "Name", "Flags" });
+                for (method_parameters.parameters.items) |parameter| {
+                    try writer.print("      {s: <30}", .{
+                        parameter.name(cf.constant_pool),
+                    });
+
+                    var aiter = parameter.access_flags.iter();
+
+                    while (aiter.next()) |a| {
+                        try writer.print(" {s}", .{a.name()});
+                    }
+                    try writer.print("\n", .{});
+                }
+            },
+            else => |other| {
+                std.debug.print("{any}", .{other});
+                unreachable;
+            },
         }
     }
 }
@@ -490,7 +509,61 @@ fn printFooter(writer: Writer, cf: ClassFile) !void {
                 const name = readString(cf.constant_pool, index - 1);
                 try writer.print("SourceFile: \"{s}\"\n", .{name});
             },
-            else => {},
+            .runtime_visible_annotations => |runtime_visible_annotations| {
+                for (runtime_visible_annotations.annotations, 0..) |annotation, i| {
+                    try writer.print("RuntimeVisibleAnnotations:\n", .{});
+                    try writer.print("  {d}: #{d}(", .{
+                        i,
+                        annotation.type_index,
+                    });
+
+                    for (annotation.element_value_pairs, 0..) |pair, j| {
+                        if (j > 1) try writer.print(", ", .{});
+                        try writer.print("#{d}=", .{
+                            pair.element_name_index,
+                        });
+                        switch (pair.value) {
+                            .String => |string| try writer.print("s#{d}", .{string}),
+                            else => unreachable,
+                        }
+                    }
+
+                    try writer.print(")\n", .{});
+                    const type_name = readString(cf.constant_pool, annotation.type_index - 1);
+                    try writer.print("    ", .{});
+                    try printWithNamespace(writer, type_name[1 .. type_name.len - 1]);
+                    try writer.print("(\n", .{});
+
+                    for (annotation.element_value_pairs) |pair| {
+                        try writer.print("      {s}=", .{
+                            readString(cf.constant_pool, pair.element_name_index - 1),
+                        });
+                        switch (pair.value) {
+                            .String => |string| {
+                                try writer.print("\"", .{});
+                                try print_string(writer, readString(cf.constant_pool, string - 1));
+                                try writer.print("\"", .{});
+                            },
+                            else => unreachable,
+                        }
+                        try writer.print("\n", .{});
+                    }
+
+                    try writer.print("    )\n", .{});
+                }
+            },
+            .unknown => |unknown| {
+                try writer.print("  {s}: length = 0x{x} (unknown attribute)\n", .{
+                    unknown.unknown_name,
+                    unknown.data.len,
+                });
+                try writer.print("  ", .{});
+                for (unknown.data) |byte| {
+                    try writer.print(" {x:0>2}", .{byte});
+                }
+                try writer.print("\n", .{});
+            },
+            else => unreachable,
         }
     }
 }
@@ -550,11 +623,7 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
             Entry.fieldref => |fieldref| {
                 try print_ref(writer, "Fieldref", fieldref);
             },
-            else => {
-                try writer.print("{}\n", .{constant});
-                //std.debug.print("{}\n", .{constant});
-                //unreachable;
-            },
+            else => unreachable,
         }
     }
 }

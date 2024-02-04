@@ -1,7 +1,6 @@
 const std = @import("std");
 const ConstantPool = @import("ConstantPool.zig");
-
-const logger = std.log.scoped(.cf_attributes);
+const utils = @import("utils.zig");
 
 // TODO: Implement all attribute types
 pub const AttributeInfo = union(enum) {
@@ -12,7 +11,8 @@ pub const AttributeInfo = union(enum) {
     line_number_table: LineNumberTableAttribute,
     source_file: SourceFileAttribute,
     exceptions: ExceptionsAttribute,
-    unknown: void,
+    methodParameters: MethodParametersAttribute,
+    unknown: UnknownAttribute,
 
     pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) anyerror!AttributeInfo {
         const attribute_name_index = try reader.readInt(u16, .big);
@@ -27,14 +27,29 @@ pub const AttributeInfo = union(enum) {
 
         inline for (std.meta.fields(AttributeInfo)) |field| {
             if (field.type == void) {} else {
-                if (std.mem.eql(u8, @field(field.type, "name"), name)) {
-                    return @unionInit(AttributeInfo, field.name, try @field(field.type, "decode")(constant_pool, allocator, fbs.reader()));
+                const field_name = @field(field.type, "name");
+                const is_unknown = std.mem.eql(u8, field_name, "Unknown");
+                if (std.mem.eql(u8, field_name, name) and !is_unknown) {
+                    return @unionInit(
+                        AttributeInfo,
+                        field.name,
+                        try @field(field.type, "decode")(
+                            constant_pool,
+                            allocator,
+                            fbs.reader(),
+                        ),
+                    );
                 }
             }
         }
 
-        logger.err("Could not decode attribute: {s}", .{name});
-        return .unknown;
+        return AttributeInfo{
+            .unknown = try UnknownAttribute.decode_unknown(
+                name,
+                allocator,
+                fbs.reader(),
+            ),
+        };
     }
 
     pub fn calcAttrLen(self: AttributeInfo) u32 {
@@ -311,6 +326,106 @@ pub const ExceptionsAttribute = struct {
 
     pub fn deinit(self: *ExceptionsAttribute) void {
         self.exception_index_table.deinit(self.allocator);
+    }
+};
+
+const MethodParameter = struct {
+    const AccessFlagsValue = enum(u16) {
+        final = 0x0010,
+        synthetic = 0x1000,
+        mandated = 0x8000,
+
+        pub fn name(it: AccessFlagsValue) []const u8 {
+            return switch (it) {
+                .final => "final",
+                .synthetic => "synthetic",
+                .mandated => "mandated",
+            };
+        }
+    };
+
+    const AccessFlagsIter = utils.EnumIter(AccessFlagsValue);
+
+    const AccessFlags = packed union {
+        value: u16,
+
+        pub fn iter(it: AccessFlags) AccessFlagsIter {
+            return AccessFlagsIter{
+                .value = it.value,
+            };
+        }
+    };
+
+    name_index: u16,
+    access_flags: AccessFlags,
+
+    pub fn name(it: MethodParameter, cp: *ConstantPool) []const u8 {
+        return switch (cp.get(it.name_index)) {
+            .utf8 => |utf8| utf8.bytes,
+            else => unreachable,
+        };
+    }
+
+    pub fn decode(reader: anytype) !MethodParameter {
+        var entry: MethodParameter = undefined;
+        entry.name_index = try reader.readInt(u16, .big);
+        entry.access_flags.value = try reader.readInt(u16, .big);
+        return entry;
+    }
+};
+
+pub const MethodParametersAttribute = struct {
+    const Self = @This();
+
+    pub const name = "MethodParameters";
+
+    allocator: std.mem.Allocator,
+    parameters: std.ArrayListUnmanaged(MethodParameter),
+
+    pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !Self {
+        _ = constant_pool;
+
+        const parameters_count = try reader.readInt(u8, .big);
+        var parameters =
+            try std.ArrayListUnmanaged(MethodParameter)
+            .initCapacity(allocator, parameters_count);
+
+        parameters.items.len = parameters_count;
+        for (parameters.items) |*entry| entry.* = try MethodParameter.decode(reader);
+
+        return MethodParametersAttribute{ .allocator = allocator, .parameters = parameters };
+    }
+
+    pub fn deinit(self: *Self) void {
+        _ = self;
+    }
+};
+
+pub const UnknownAttribute = struct {
+    const Self = @This();
+    pub const name = "Unknown";
+
+    allocator: std.mem.Allocator,
+    unknown_name: []const u8,
+    data: []const u8,
+
+    pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !Self {
+        _ = reader;
+        _ = allocator;
+        _ = constant_pool;
+        unreachable;
+    }
+
+    pub fn decode_unknown(unknown_name: []u8, allocator: std.mem.Allocator, reader: anytype) !Self {
+        return Self{
+            .allocator = allocator,
+            .unknown_name = unknown_name,
+            .data = try reader.readAllAlloc(allocator, 400000),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        _ = self;
     }
 };
 

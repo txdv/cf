@@ -142,15 +142,11 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
     // var attributess = try std.ArrayList(attributes.AttributeInfo).initCapacity(allocator, try reader.readInt(u16, .big));
     // for (attributess.items) |*a| a.* = try attributes.AttributeInfo.decode(&constant_pool, allocator, reader);
     // TODO: Fix this awful, dangerous, slow hack
-    var attributes_length = try reader.readInt(u16, .big);
+    const attributes_length = try reader.readInt(u16, .big);
     var attributes_index: usize = 0;
     var attributess = std.ArrayList(attributes.AttributeInfo).init(allocator);
     while (attributes_index < attributes_length) : (attributes_index += 1) {
         const decoded = try attributes.AttributeInfo.decode(constant_pool, allocator, reader);
-        if (decoded == .unknown) {
-            attributes_length -= 1;
-            continue;
-        }
         try attributess.append(decoded);
     }
 
