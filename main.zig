@@ -15,16 +15,29 @@ const Operation = ops.Operation;
 
 const Allocator = std.mem.Allocator;
 
-pub fn readFile(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
-    var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const path = try std.fs.realpath(filename, &path_buffer);
+const FileData = struct {
+    path_buffer: [std.fs.MAX_PATH_BYTES]u8,
+    path: []u8,
+    data: []const u8,
+    mtime: i128,
 
-    const file = try std.fs.openFileAbsolute(path, .{});
+    fn free(it: FileData, allocator: std.mem.Allocator) void {
+        _ = it;
+        _ = allocator;
+    }
+};
+
+fn readFileData(allocator: std.mem.Allocator, filename: []const u8, file_data: *FileData) !void {
+    file_data.path = try std.fs.realpath(filename, &file_data.path_buffer);
+    file_data.path_buffer[file_data.path.len] = 0;
+    file_data.path = file_data.path_buffer[0..file_data.path.len];
+
+    const file = try std.fs.openFileAbsolute(file_data.path, .{});
+    const stat = try file.stat();
+    file_data.mtime = stat.mtime;
 
     const max_bytes = 1024 * 4096 * 4095;
-
-    const bytes = try file.readToEndAlloc(allocator, max_bytes);
-    return bytes;
+    file_data.data = try file.readToEndAlloc(allocator, max_bytes);
 }
 
 pub fn getFilename() []const u8 {
@@ -44,17 +57,19 @@ pub fn main() !void {
     const w = buf.writer();
 
     const filename = getFilename();
-    const allocator = std.heap.page_allocator;
-    const data = try readFile(allocator, filename);
-    defer allocator.free(data);
 
-    var stream = std.io.fixedBufferStream(data);
+    const allocator = std.heap.page_allocator;
+    var file_data: FileData = undefined;
+    try readFileData(allocator, filename, &file_data);
+    defer file_data.free(allocator);
+
+    var stream = std.io.fixedBufferStream(file_data.data);
     const reader = stream.reader();
 
     var cf = try ClassFile.decode(allocator, reader);
     defer cf.deinit();
 
-    try printVerbose(w, cf);
+    try printVerbose(w, cf, file_data);
     try buf.flush();
 }
 
@@ -71,7 +86,7 @@ fn printCompiledFrom(cf: ClassFile, writer: Writer) !void {
                 const entry = cf.constant_pool.entries.items[source_file_index];
                 switch (entry) {
                     Entry.utf8 => |utf8| {
-                        try writer.print("Compiled from \"{s}\"\n", .{utf8.bytes});
+                        try writer.print("  Compiled from \"{s}\"\n", .{utf8.bytes});
                     },
                     else => unreachable,
                 }
@@ -82,13 +97,12 @@ fn printCompiledFrom(cf: ClassFile, writer: Writer) !void {
 }
 
 fn readString(cp: *ConstantPool, index: u16) []u8 {
-    const entry = cp.entries.items[index];
-    switch (entry) {
-        Entry.utf8 => |utf8| {
-            return utf8.bytes;
-        },
+    const entry = cp.get(index);
+    return switch (entry) {
+        .utf8 => |utf8| utf8.bytes,
+        .class => |class| readString(cp, class.name_index),
         else => unreachable,
-    }
+    };
 }
 
 fn printClass(writer: Writer, cf: ClassFile) !void {
@@ -242,8 +256,8 @@ fn printMethodExceptions(writer: Writer, cp: *ConstantPool, exceptions: Exceptio
     }
 }
 
-fn printVerbose(writer: Writer, cf: ClassFile) !void {
-    try printHeader(writer, cf);
+fn printVerbose(writer: Writer, cf: ClassFile, file_data: FileData) !void {
+    try printHeader(writer, cf, file_data);
     try printConstantPool(writer, cf);
     try writer.print("{{\n", .{});
     for (cf.methods.items) |method| {
@@ -256,7 +270,7 @@ fn printVerbose(writer: Writer, cf: ClassFile) !void {
 
 fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
     try writer.print("    descriptor: {s}\n", .{method.getDescriptor().bytes});
-    try writer.print("    flags (0x{X:0>4}): ", .{
+    try writer.print("    flags: (0x{X:0>4}) ", .{
         method.access_flags.value,
     });
 
@@ -522,29 +536,62 @@ fn printDetailed(writer: Writer, cf: ClassFile, constant: Entry) !void {
     }
 }
 
-fn printHeader(writer: Writer, cf: ClassFile) !void {
-    try writer.print("Classfile ...\n", .{});
-    try writer.print("Compiled from \"{s}\"\n", .{"file"});
+pub fn printSha256sum(writer: Writer, data: []const u8) !void {
+    var hash: [32]u8 = undefined;
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update(data);
+    hasher.final(&hash);
+    for (hash) |h| {
+        try writer.print("{x:0>2}", .{h});
+    }
+    try writer.print("\n", .{});
+}
+
+fn printHeader(writer: Writer, cf: ClassFile, file_data: FileData) !void {
+    try writer.print("Classfile {s}\n", .{file_data.path});
+    try writer.print("  Last modified {s}; size {d} bytes\n", .{
+        "date",
+        file_data.data.len,
+    });
+
+    try writer.print("  SHA-256 checksum ", .{});
+    try printSha256sum(writer, file_data.data);
+
+    if (findSourceFile(cf)) |source_file| {
+        try writer.print("  Compiled from \"{s}\"\n", .{source_file});
+    }
     const className = readString(cf.constant_pool, cf.this_class);
-    try writer.print("public class {s}\n", .{className});
-    try writer.print("  minor_version: {}\n", .{cf.minor_version});
-    try writer.print("  major_version: {}\n", .{cf.major_version});
-    try writer.print("  flags: (0x{X:0>4})", .{cf.access_flags.value});
+    var iter = cf.access_flags.iter();
+    while (iter.next()) |flag| {
+        if (flag != .super) {
+            try writer.print("{s} ", .{@tagName(flag)});
+        }
+    }
+    try writer.print("class {s}\n", .{className});
+    try writer.print("  minor version: {}\n", .{cf.minor_version});
+    try writer.print("  major version: {}\n", .{cf.major_version});
+    try writer.print("  flags: (0x{X:0>4}) ", .{cf.access_flags.value});
 
     var flags_iter = cf.access_flags.iter();
     while (flags_iter.next()) |flag| {
         if (flags_iter.index > 1) {
             try writer.print(", ", .{});
         }
-        try writer.print(" {s}", .{flag.name()});
+        try writer.print("{s}", .{flag.name()});
     }
 
     try writer.print("\n", .{});
-    try writer.print("  this_class: #{}\n", .{cf.this_class});
+    try writer.print("  this_class: #{: <27}// {s}\n", .{
+        cf.this_class,
+        readString(cf.constant_pool, cf.this_class),
+    });
     if (cf.super_class) |super_class| {
-        try writer.print("  super_class: #{}\n", .{super_class});
+        try writer.print("  super_class: #{: <26}// {s}\n", .{
+            super_class,
+            readString(cf.constant_pool, super_class),
+        });
     }
-    try writer.print("  interfaces: {}, fields: {}, methods {}, attributes: {}\n", .{
+    try writer.print("  interfaces: {}, fields: {}, methods: {}, attributes: {}\n", .{
         cf.interfaces.items.len,
         cf.fields.items.len,
         cf.methods.items.len,
@@ -552,12 +599,27 @@ fn printHeader(writer: Writer, cf: ClassFile) !void {
     });
 }
 
+fn findSourceFile(cf: ClassFile) ?[]const u8 {
+    var file: ?[]const u8 = null;
+
+    for (cf.attributes.items) |attribute| {
+        switch (attribute) {
+            .source_file => |source_file| {
+                file = readString(cf.constant_pool, source_file.source_file_index);
+            },
+            else => {},
+        }
+    }
+
+    return file;
+}
+
 fn printFooter(writer: Writer, cf: ClassFile) !void {
     for (cf.attributes.items) |attribute| {
         switch (attribute) {
             .source_file => |source_file| {
                 const index = source_file.source_file_index;
-                const name = readString(cf.constant_pool, index - 1);
+                const name = readString(cf.constant_pool, index);
                 try writer.print("SourceFile: \"{s}\"\n", .{name});
             },
             .runtime_visible_annotations => |runtime_visible_annotations| {
@@ -580,19 +642,19 @@ fn printFooter(writer: Writer, cf: ClassFile) !void {
                     }
 
                     try writer.print(")\n", .{});
-                    const type_name = readString(cf.constant_pool, annotation.type_index - 1);
+                    const type_name = readString(cf.constant_pool, annotation.type_index);
                     try writer.print("    ", .{});
                     try printWithNamespace(writer, type_name[1 .. type_name.len - 1]);
                     try writer.print("(\n", .{});
 
                     for (annotation.element_value_pairs) |pair| {
                         try writer.print("      {s}=", .{
-                            readString(cf.constant_pool, pair.element_name_index - 1),
+                            readString(cf.constant_pool, pair.element_name_index),
                         });
                         switch (pair.value) {
                             .String => |string| {
                                 try writer.print("\"", .{});
-                                try print_string(writer, readString(cf.constant_pool, string - 1));
+                                try print_string(writer, readString(cf.constant_pool, string));
                                 try writer.print("\"", .{});
                             },
                             else => unreachable,
@@ -637,7 +699,7 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
             },
             .name_and_type => |name_and_type| {
                 const name = "NameAndType";
-                const number = try std.fmt.bufPrint(buffer[0..], "#{}.{}", .{
+                const number = try std.fmt.bufPrint(buffer[0..], "#{}:#{}", .{
                     name_and_type.name_index,
                     name_and_type.descriptor_index,
                 });
@@ -659,7 +721,7 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                 try writer.print("\n", .{});
             },
             .string => |string| {
-                const string_value = readString(cf.constant_pool, string.string_index - 1);
+                const string_value = readString(cf.constant_pool, string.string_index);
                 const name = "String";
                 const number = try std.fmt.bufPrint(buffer[0..], "#{}", .{string.string_index});
                 try writer.print("{s: <18} {s: <14} // {s}\n", .{
@@ -707,7 +769,7 @@ fn print_string(writer: Writer, string: []const u8) !void {
 fn print_ref(writer: Writer, name: []const u8, ref: RefInfo) !void {
     var buffer: [100]u8 = undefined;
 
-    const number = try std.fmt.bufPrint(buffer[0..], "#{}.{}", .{
+    const number = try std.fmt.bufPrint(buffer[0..], "#{}.#{}", .{
         ref.class_index,
         ref.name_and_type_index,
     });
