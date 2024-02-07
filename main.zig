@@ -455,14 +455,27 @@ fn printMethodCode(writer: Writer, code_attribute: CodeAttribute, cf: ClassFile)
                 return err;
             }
         };
-        try writer.print("{: >10}: {s: <14}", .{
-            offset,
-            @tagName(op),
-        });
+
+        const operationType = OperationType.fromOperation(op);
+
+        switch (operationType) {
+            .empty => {
+                try writer.print("{: >10}: {s}", .{
+                    offset,
+                    @tagName(op),
+                });
+            },
+            else => {
+                try writer.print("{: >10}: {s: <14}", .{
+                    offset,
+                    @tagName(op),
+                });
+            },
+        }
 
         offset += op.sizeOf();
 
-        switch (OperationType.fromOperation(op)) {
+        switch (operationType) {
             .bi_push_params => |bi_push_params| {
                 try writer.print("#{}", .{
                     bi_push_params,
