@@ -6,7 +6,47 @@ const ConstantPool = @import("ConstantPool.zig");
 
 const FieldInfo = @This();
 
-pub const AccessFlags = struct {
+pub const AccessFlagsValue = enum(u16) {
+    public = 0x0001,
+    private = 0x0002,
+    protected = 0x004,
+    static = 0x0008,
+    final = 0x0010,
+    @"volatile" = 0x0040,
+    transient = 0x0080,
+    synthetic = 0x1000,
+    @"enum" = 0x4000,
+
+    pub fn name(flag: AccessFlagsValue) []const u8 {
+        return switch (flag) {
+            .public => "ACC_PUBLIC",
+            .private => "ACC_PRIVATE",
+            .protected => "ACC_PROTECTED",
+            .static => "ACC_STATIC",
+            .final => "ACC_FINAL",
+            .@"volatile" => "ACC_VOLATILE",
+            .transient => "ACC_TRANSIENT",
+            .synthetic => "ACC_SYNTHETIC",
+            .@"enum" => "ACC_ENUM",
+        };
+    }
+
+    pub fn keyword(flag: AccessFlagsValue) []const u8 {
+        return switch (flag) {
+            .public => "public",
+            .private => "private",
+            .protected => "protected",
+            .static => "static",
+            .final => "final",
+            .@"volatile" => "volatile",
+            .transient => "transient",
+            .synthetic => "synthetic",
+            .@"enum" => "enum",
+        };
+    }
+};
+
+pub const AccessFlagsFields = packed struct {
     public: bool = false,
     private: bool = false,
     protected: bool = false,
@@ -16,6 +56,19 @@ pub const AccessFlags = struct {
     transient: bool = false,
     synthetic: bool = false,
     enum_member: bool = false,
+};
+
+const AccessFlagsIter = utils.EnumIter(AccessFlagsValue);
+
+pub const AccessFlags = packed union {
+    value: u16,
+    flags: AccessFlagsFields,
+
+    pub fn iter(it: AccessFlags) AccessFlagsIter {
+        return AccessFlagsIter{
+            .value = it.value,
+        };
+    }
 };
 
 constant_pool: *ConstantPool,
@@ -56,17 +109,7 @@ pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader
     return FieldInfo{
         .constant_pool = constant_pool,
 
-        .access_flags = .{
-            .public = utils.isPresent(u16, access_flags_u, 0x0001),
-            .private = utils.isPresent(u16, access_flags_u, 0x0002),
-            .protected = utils.isPresent(u16, access_flags_u, 0x0004),
-            .static = utils.isPresent(u16, access_flags_u, 0x0008),
-            .final = utils.isPresent(u16, access_flags_u, 0x0010),
-            .@"volatile" = utils.isPresent(u16, access_flags_u, 0x0040),
-            .transient = utils.isPresent(u16, access_flags_u, 0x0080),
-            .synthetic = utils.isPresent(u16, access_flags_u, 0x1000),
-            .enum_member = utils.isPresent(u16, access_flags_u, 0x4000),
-        },
+        .access_flags = AccessFlags{ .value = access_flags_u },
         .name_index = name_index,
         .descriptor_index = descriptor_index,
         .attributes = attributes,

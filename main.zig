@@ -1,5 +1,6 @@
 const std = @import("std");
 const MethodInfo = @import("src/MethodInfo.zig");
+const FieldInfo = @import("src/FieldInfo.zig");
 const ClassFile = @import("src/ClassFile.zig");
 const AccessFlagsValue = ClassFile.AccessFlagsValue;
 const ConstantPool = @import("src/ConstantPool.zig");
@@ -125,6 +126,7 @@ fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
     const descriptor = method.getDescriptor().bytes;
     if (!is_constructor)
         try printReturnType(writer, descriptor);
+
     try writer.print("{s}", .{name});
     try printArguments(writer, descriptor);
     try printExceptions(writer, cf.constant_pool, method);
@@ -260,12 +262,100 @@ fn printVerbose(writer: Writer, cf: ClassFile, file_data: FileData) !void {
     try printHeader(writer, cf, file_data);
     try printConstantPool(writer, cf);
     try writer.print("{{\n", .{});
+    var i: usize = 0;
+    for (cf.fields.items) |field| {
+        if (std.mem.eql(u8, field.getName().bytes, "serialVersionUID")) {
+            continue;
+        }
+
+        if (i > 0) {
+            try writer.print("\n", .{});
+        }
+        try printField(writer, field);
+        i += 1;
+    }
     for (cf.methods.items) |method| {
+        if (i > 0) {
+            try writer.print("\n", .{});
+        }
         try printMethod(writer, cf, method);
         try printMethodDetailed(writer, cf, method);
+        i += 1;
     }
     try writer.print("}}\n", .{});
     try printFooter(writer, cf);
+}
+
+fn printField(writer: Writer, field: FieldInfo) !void {
+    var iter = field.access_flags.iter();
+    try writer.print("  ", .{});
+    while (iter.next()) |access_flag| {
+        try writer.print("{s} ", .{access_flag.keyword()});
+    }
+
+    const descriptor = field.getDescriptor().bytes;
+
+    try printNormalizedType(writer, descriptor);
+
+    try writer.print(" {s};\n", .{
+        field.getName().bytes,
+    });
+
+    try writer.print("    descriptor: {s}\n", .{
+        descriptor,
+    });
+
+    try writer.print("    flags: (0x{X:0>4}) ", .{
+        field.access_flags.value,
+    });
+
+    iter = field.access_flags.iter();
+    var i: usize = 0;
+    while (iter.next()) |access_flag| {
+        try writer.print("{s}", .{access_flag.name()});
+        i += 1;
+        if (i < @popCount(field.access_flags.value)) {
+            try writer.print(", ", .{});
+        }
+    }
+    try writer.print("\n", .{});
+}
+
+fn printNormalizedType(writer: Writer, descriptor: []const u8) !void {
+    if (descriptor.len == 1) {
+        if (descriptor[0] == 'V') {
+            try writer.print("void", .{});
+        } else if (descriptor[0] == 'J') {
+            try writer.print("long", .{});
+        } else {
+            std.debug.print("{s}", .{
+                descriptor,
+            });
+            unreachable;
+        }
+    } else {
+        if (descriptor[0] == 'L') {
+            var i: usize = 1;
+            var start: usize = i;
+
+            while (descriptor[i] != ';') {
+                if (descriptor[i] == '/') {
+                    try writer.print("{s}.", .{
+                        descriptor[start..i],
+                    });
+                    i += 1;
+                    start = i;
+                } else {
+                    i += 1;
+                }
+            }
+            try writer.print("{s}", .{
+                descriptor[start..i],
+            });
+        } else {
+            unreachable;
+        }
+    }
 }
 
 fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
@@ -679,13 +769,19 @@ fn printFooter(writer: Writer, cf: ClassFile) !void {
                 }
             },
             .unknown => |unknown| {
-                try writer.print("  {s}: length = 0x{x} (unknown attribute)\n", .{
+                try writer.print("  {s}: length = 0x{X} (unknown attribute)\n", .{
                     unknown.unknown_name,
                     unknown.data.len,
                 });
-                try writer.print("  ", .{});
+                var i: usize = 0;
                 for (unknown.data) |byte| {
-                    try writer.print(" {x:0>2}", .{byte});
+                    if (i > 0 and i % 16 == 0) {
+                        try writer.print("\n  ", .{});
+                    } else if (i % 16 == 0) {
+                        try writer.print("  ", .{});
+                    }
+                    try writer.print(" {X:0>2}", .{byte});
+                    i += 1;
                 }
                 try writer.print("\n", .{});
             },
@@ -697,8 +793,10 @@ fn printFooter(writer: Writer, cf: ClassFile) !void {
 fn printConstantPool(writer: Writer, cf: ClassFile) !void {
     try writer.print("Constant pool:\n", .{});
     var buffer: [100]u8 = undefined;
-    for (cf.constant_pool.entries.items, 1..) |constant, i| {
-        const is = try std.fmt.bufPrint(buffer[0..], "#{}", .{i});
+    var i: usize = 0;
+    while (i < cf.constant_pool.entries.items.len) {
+        const constant = cf.constant_pool.entries.items[i];
+        const is = try std.fmt.bufPrint(buffer[0..], "#{}", .{i + 1});
         try writer.print("{s:5} = ", .{is});
         switch (constant) {
             .class => |class| {
@@ -744,13 +842,29 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
                 });
             },
             .methodref => |method| {
-                try print_ref(writer, "Methodref", method);
+                try printRef(writer, "Methodref", method);
             },
             .fieldref => |fieldref| {
-                try print_ref(writer, "Fieldref", fieldref);
+                try printRef(writer, "Fieldref", fieldref);
             },
-            else => unreachable,
+            .long => |long| {
+                const name = "Long";
+                try writer.print("{s: <18} {d}l\n", .{
+                    name,
+                    long.bytes,
+                });
+                i += 1;
+            },
+            .integer => |integer| {
+                const name = "Integer";
+                try writer.print("{s: <18} {d}\n", .{ name, integer.bytes });
+            },
+            else => |other| {
+                std.debug.print(": {any}", .{other});
+                unreachable;
+            },
         }
+        i += 1;
     }
 }
 
@@ -779,7 +893,7 @@ fn print_string(writer: Writer, string: []const u8) !void {
     }
 }
 
-fn print_ref(writer: Writer, name: []const u8, ref: RefInfo) !void {
+fn printRef(writer: Writer, name: []const u8, ref: RefInfo) !void {
     var buffer: [100]u8 = undefined;
 
     const number = try std.fmt.bufPrint(buffer[0..], "#{}.#{}", .{
