@@ -115,17 +115,36 @@ fn printClass(writer: Writer, cf: ClassFile) !void {
     try writer.print("}}\n", .{});
 }
 
+fn isConstructor(name: []const u8) u8 {
+    if (std.mem.eql(u8, name, "<init>")) {
+        return 1;
+    } else if (std.mem.eql(u8, name, "<clinit>")) {
+        return 2;
+    } else {
+        return 0;
+    }
+}
+
 fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
     const class_name = readString(cf.constant_pool, cf.this_class);
     var name = method.getName().bytes;
-    const is_constructor = std.mem.eql(u8, name, "<init>");
-    if (is_constructor) {
-        name = class_name;
-    }
+
     try printModifiers(writer, method);
     const descriptor = method.getDescriptor().bytes;
-    if (!is_constructor)
+
+    const is_constructor = isConstructor(name);
+
+    if (is_constructor == 0) {
         try printReturnType(writer, descriptor);
+        try writer.print(" ", .{});
+    }
+
+    if (is_constructor == 1) {
+        name = class_name;
+    } else if (is_constructor == 2) {
+        try writer.print("{{}};\n", .{});
+        return;
+    }
 
     try writer.print("{s}", .{name});
     try printArguments(writer, descriptor);
@@ -154,7 +173,7 @@ fn printModifiers(writer: Writer, method: MethodInfo) !void {
 
 fn getReturnType(descriptor: []const u8) []const u8 {
     var i = descriptor.len - 1;
-    while (descriptor[i] != ')') {
+    while (descriptor[i] != ')' and i > 1) {
         i -= 1;
     }
     return descriptor[i + 1 .. descriptor.len];
@@ -162,11 +181,7 @@ fn getReturnType(descriptor: []const u8) []const u8 {
 
 fn printReturnType(writer: Writer, descriptor: []const u8) !void {
     const return_type = getReturnType(descriptor);
-    if (return_type.len == 1) {
-        if (return_type[0] == 'V') {
-            try writer.print("void ", .{});
-        }
-    }
+    try printNormalizedType(writer, return_type);
 }
 
 fn printArguments(writer: Writer, descriptor: []const u8) !void {
@@ -321,18 +336,43 @@ fn printField(writer: Writer, field: FieldInfo) !void {
     try writer.print("\n", .{});
 }
 
+fn printSimpleType(writer: Writer, jtype: u8) !void {
+    const str = getSimpleType(jtype);
+    if (str) |s| {
+        try writer.print("{s}", .{s});
+    } else {
+        std.debug.print("{c}\n", .{jtype});
+        unreachable;
+    }
+}
+
+fn getSimpleType(jtype: u8) ?[]const u8 {
+    if (jtype == 'B') {
+        return "byte";
+    } else if (jtype == 'C') {
+        return "char";
+    } else if (jtype == 'D') {
+        return "double";
+    } else if (jtype == 'F') {
+        return "float";
+    } else if (jtype == 'I') {
+        return "int";
+    } else if (jtype == 'J') {
+        return "long";
+    } else if (jtype == 'S') {
+        return "short";
+    } else if (jtype == 'Z') {
+        return "boolean";
+    } else if (jtype == 'V') {
+        return "void";
+    } else {
+        return null;
+    }
+}
+
 fn printNormalizedType(writer: Writer, descriptor: []const u8) !void {
     if (descriptor.len == 1) {
-        if (descriptor[0] == 'V') {
-            try writer.print("void", .{});
-        } else if (descriptor[0] == 'J') {
-            try writer.print("long", .{});
-        } else {
-            std.debug.print("{s}", .{
-                descriptor,
-            });
-            unreachable;
-        }
+        try printSimpleType(writer, descriptor[0]);
     } else {
         if (descriptor[0] == 'L') {
             var i: usize = 1;
