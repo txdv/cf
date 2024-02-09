@@ -186,20 +186,28 @@ fn printReturnType(writer: Writer, descriptor: []const u8) !void {
 
 fn printArguments(writer: Writer, descriptor: []const u8) !void {
     try writer.print("(", .{});
-    var i: usize = descriptor.len - 2;
-    while (i > 0 and descriptor[i] != '(') {
-        if (descriptor[i] == ';') {
-            const end = i;
-            while (descriptor[i] != 'L') {
-                i -= 1;
+    var i: usize = 1;
+    while (i < descriptor.len and descriptor[i] != ')') {
+        const ch = descriptor[i];
+        if (getSimpleType(ch)) |simple_type| {
+            try writer.print("{s}", .{simple_type});
+            i += 1;
+        } else if (ch == 'L') {
+            i += 1;
+            const start: usize = i;
+            while (descriptor[i] != ';') {
+                i += 1;
             }
-            const start = i + 1;
+            const end = i;
+            i += 1;
             const name = descriptor[start..end];
             try printWithNamespace(writer, name);
-        } else if (descriptor[i] == '[') {
+        } else if (ch == '[') {
+            i += 1;
             try writer.print("[]", .{});
+        } else {
+            unreachable;
         }
-        i -= 1;
     }
     try writer.print(")", .{});
 }
