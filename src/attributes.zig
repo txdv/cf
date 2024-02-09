@@ -1,5 +1,6 @@
 const std = @import("std");
 const ConstantPool = @import("ConstantPool.zig");
+const ClassAccessFlags = @import("ClassFile.zig").AccessFlags;
 const utils = @import("utils.zig");
 
 // TODO: Implement all attribute types
@@ -11,7 +12,10 @@ pub const AttributeInfo = union(enum) {
     line_number_table: LineNumberTableAttribute,
     source_file: SourceFileAttribute,
     exceptions: ExceptionsAttribute,
-    methodParameters: MethodParametersAttribute,
+    method_parameters: MethodParametersAttribute,
+    local_variable_table: LocalVariableTableAttribute,
+    signature: SignatureAttribute,
+    inner_classes: InnerClassesAttribute,
     unknown: UnknownAttribute,
 
     pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) anyerror!AttributeInfo {
@@ -705,5 +709,108 @@ pub const RuntimeVisibleAnnotationsAttribute = struct {
     pub fn deinit(self: *RuntimeVisibleAnnotationsAttribute) void {
         for (self.annotations) |annotation| annotation.deinit(self.allocator);
         self.allocator.free(self.annotations);
+    }
+};
+
+pub const LocalVariable = packed struct {
+    start_pc: u16,
+    length: u16,
+    name_index: u16,
+    descriptor_index: u16,
+    index: u16,
+};
+
+pub const LocalVariableTableAttribute = struct {
+    allocator: std.mem.Allocator,
+    constant_pool: *ConstantPool,
+    variables: []LocalVariable,
+
+    pub const name = "LocalVariableTable";
+
+    pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !LocalVariableTableAttribute {
+        const length = try reader.readInt(u16, .big);
+        const variables = try allocator.alloc(LocalVariable, length);
+
+        for (0..length) |i| {
+            variables[i] = LocalVariable{
+                .start_pc = try reader.readInt(u16, .big),
+                .length = try reader.readInt(u16, .big),
+                .name_index = try reader.readInt(u16, .big),
+                .descriptor_index = try reader.readInt(u16, .big),
+                .index = try reader.readInt(u16, .big),
+            };
+        }
+
+        return LocalVariableTableAttribute{
+            .allocator = allocator,
+            .constant_pool = constant_pool,
+            .variables = variables,
+        };
+    }
+
+    pub fn deinit(self: *LocalVariableTableAttribute) void {
+        _ = self;
+    }
+};
+
+pub const SignatureAttribute = struct {
+    allocator: std.mem.Allocator,
+    constant_pool: *ConstantPool,
+    signature_index: u16,
+
+    pub const name = "Signature";
+
+    pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !SignatureAttribute {
+        return SignatureAttribute{
+            .allocator = allocator,
+            .constant_pool = constant_pool,
+            .signature_index = try reader.readInt(u16, .big),
+        };
+    }
+
+    pub fn deinit(self: *SignatureAttribute) void {
+        _ = self;
+    }
+};
+
+const InnerClass = packed struct {
+    inner_class_info_index: u16,
+    outer_class_info_index: u16,
+    inner_name_index: u16,
+    inner_class_access_flags: ClassAccessFlags,
+};
+
+pub const InnerClassesAttribute = struct {
+    allocator: std.mem.Allocator,
+    constant_pool: *ConstantPool,
+    inner_classes: []InnerClass,
+
+    pub const name = "InnerClasses";
+
+    pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !InnerClassesAttribute {
+        const length = try reader.readInt(u16, .big);
+
+        const inner_classes = try allocator.alloc(InnerClass, length);
+
+        for (0..length) |i| {
+            inner_classes[i] = InnerClass{
+                .inner_class_info_index = try reader.readInt(u16, .big),
+                .outer_class_info_index = try reader.readInt(u16, .big),
+                .inner_name_index = try reader.readInt(u16, .big),
+                .inner_class_access_flags = ClassAccessFlags{
+                    .value = try reader.readInt(u16, .big),
+                },
+            };
+        }
+
+        return InnerClassesAttribute{
+            .allocator = allocator,
+            .constant_pool = constant_pool,
+            .inner_classes = inner_classes,
+        };
+    }
+
+    pub fn deinit(self: *InnerClassesAttribute) void {
+        _ = self;
     }
 };

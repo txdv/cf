@@ -435,7 +435,23 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
                                 });
                             }
                         },
-                        else => {},
+                        .local_variable_table => |local_variable_table| {
+                            try writer.print("      LocalVariableTable:\n", .{});
+                            try writer.print("        Start  Length  Slot  Name   Signature\n", .{});
+                            for (local_variable_table.variables) |local_variable| {
+                                try writer.print("         {: >4}  {: >6}  {: >4}  {s: >4}   {s: <9}\n", .{
+                                    local_variable.start_pc,
+                                    local_variable.length,
+                                    local_variable.index,
+                                    cf.constant_pool.get(local_variable.name_index).utf8.bytes,
+                                    cf.constant_pool.get(local_variable.descriptor_index).utf8.bytes,
+                                });
+                            }
+                        },
+                        else => |other| {
+                            std.debug.print("local variable {any}", .{other});
+                            unreachable;
+                        },
                     }
                 }
             },
@@ -444,7 +460,7 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
                 try printMethodExceptions(writer, cf.constant_pool, exceptions);
                 try writer.print("\n", .{});
             },
-            .methodParameters => |method_parameters| {
+            .method_parameters => |method_parameters| {
                 try writer.print("    MethodParameters:\n", .{});
                 try writer.print("      {s: <30} {s}\n", .{ "Name", "Flags" });
                 for (method_parameters.parameters.items) |parameter| {
@@ -460,12 +476,23 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
                     try writer.print("\n", .{});
                 }
             },
+            .signature => |signature| {
+                try writer.print("    ", .{});
+                try printSignature(writer, signature);
+            },
             else => |other| {
                 std.debug.print("{any}", .{other});
                 unreachable;
             },
         }
     }
+}
+
+fn printSignature(writer: Writer, signature: attributes.SignatureAttribute) !void {
+    try writer.print("Signature: #{: <27} // {s}\n", .{
+        signature.signature_index,
+        signature.constant_pool.get(signature.signature_index).utf8.bytes,
+    });
 }
 
 pub const OpType = enum {
@@ -606,6 +633,17 @@ fn printMethodCode(writer: Writer, code_attribute: CodeAttribute, cf: ClassFile)
         offset += op.sizeOf();
 
         switch (operationType) {
+            .ldc => |constant| {
+                try writer.print("#{: <18} // ", .{
+                    constant,
+                });
+
+                try printDetailed(
+                    writer,
+                    cf,
+                    cf.constant_pool.get(constant),
+                );
+            },
             .bi_push_params => |bi_push_params| {
                 try writer.print("#{}", .{
                     bi_push_params,
@@ -621,7 +659,11 @@ fn printMethodCode(writer: Writer, code_attribute: CodeAttribute, cf: ClassFile)
                     pool_ref,
                 });
 
-                try printDetailed(writer, cf, cf.constant_pool.get(pool_ref));
+                try printDetailed(
+                    writer,
+                    cf,
+                    cf.constant_pool.get(pool_ref),
+                );
             },
             else => {},
         }
@@ -635,12 +677,10 @@ fn printDetailed(writer: Writer, cf: ClassFile, constant: Entry) !void {
         .fieldref => |fieldref| {
             try writer.print("Field ", .{});
 
-            try printDetailed(
-                writer,
-                cf,
-                fieldref.constant_pool.get(fieldref.class_index),
-            );
-            try writer.print(".", .{});
+            if (fieldref.class_index != cf.this_class) {
+                const class_info = fieldref.constant_pool.get(fieldref.class_index).class;
+                try writer.print("{s}.", .{class_info.getName().bytes});
+            }
 
             try printDetailed(
                 writer,
@@ -650,12 +690,10 @@ fn printDetailed(writer: Writer, cf: ClassFile, constant: Entry) !void {
         },
         .methodref => |methodref| {
             try writer.print("Method ", .{});
-            try printDetailed(
-                writer,
-                cf,
-                methodref.constant_pool.get(methodref.class_index),
-            );
-            try writer.print(".", .{});
+            if (methodref.class_index != cf.this_class) {
+                const class_info = methodref.constant_pool.get(methodref.class_index).class;
+                try writer.print("{s}.", .{class_info.getName().bytes});
+            }
 
             try printDetailed(
                 writer,
@@ -664,12 +702,22 @@ fn printDetailed(writer: Writer, cf: ClassFile, constant: Entry) !void {
             );
         },
         .class => |class_info| {
-            try writer.print("{s}", .{class_info.getName().bytes});
+            try writer.print("class {s}", .{class_info.getName().bytes});
         },
         .name_and_type => |name_and_type| {
             try writer.print("{s}:{s}", .{
-                name_and_type.getName().bytes,
+                escape(name_and_type.getName().bytes),
                 name_and_type.getDescriptor().bytes,
+            });
+        },
+        .string => |string| {
+            try writer.print("String {s}", .{
+                cf.constant_pool.get(string.string_index).utf8.bytes,
+            });
+        },
+        .integer => |integer| {
+            try writer.print("int {d}", .{
+                integer.bytes,
             });
         },
         else => {
@@ -825,9 +873,46 @@ fn printFooter(writer: Writer, cf: ClassFile) !void {
                 }
                 try writer.print("\n", .{});
             },
+            .signature => |signature| try printSignature(writer, signature),
+            .inner_classes => |inner_classes| {
+                try writer.print("InnerClasses:\n", .{});
+                for (inner_classes.inner_classes) |inner_class| {
+                    var iter = inner_class.inner_class_access_flags.iter();
+                    try writer.print("  ", .{});
+                    while (iter.next()) |flag| {
+                        try writer.print("{s} ", .{flag.keyword()});
+                    }
+
+                    try writer.print("#{d};", .{
+                        inner_class.inner_class_info_index,
+                    });
+
+                    const count = 25 - intAsStringLength(inner_class.inner_class_info_index);
+
+                    for (count) |_| {
+                        try writer.print(" ", .{});
+                    }
+
+                    const class_index = inner_class.inner_class_info_index;
+                    const class = cf.constant_pool.get(class_index).class;
+                    try writer.print("// class {s}\n", .{
+                        class.getName().bytes,
+                    });
+                }
+            },
             else => unreachable,
         }
     }
+}
+
+fn intAsStringLength(number: u16) usize {
+    var count: usize = 0;
+    var rest = number;
+    while (rest > 0) {
+        rest = rest / 10;
+        count += 1;
+    }
+    return count;
 }
 
 fn printConstantPool(writer: Writer, cf: ClassFile) !void {

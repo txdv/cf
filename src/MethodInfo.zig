@@ -91,15 +91,11 @@ pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader
     const name_index = try reader.readInt(u16, .big);
     const descriptor_index = try reader.readInt(u16, .big);
 
-    var attributes_length = try reader.readInt(u16, .big);
+    const attributes_length = try reader.readInt(u16, .big);
     var attributes_index: usize = 0;
     var attributess = std.ArrayList(AttributeInfo).init(allocator);
     while (attributes_index < attributes_length) : (attributes_index += 1) {
         const decoded = try AttributeInfo.decode(constant_pool, allocator, reader);
-        if (decoded == .unknown) {
-            attributes_length -= 1;
-            continue;
-        }
         try attributess.append(decoded);
     }
 

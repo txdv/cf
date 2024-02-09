@@ -35,6 +35,20 @@ pub const AccessFlagsValue = enum(u16) {
             .module => "ACC_MODULE",
         };
     }
+
+    pub fn keyword(flag: AccessFlagsValue) []const u8 {
+        return switch (flag) {
+            .public => "public",
+            .super => "super",
+            .final => "final",
+            .interface => "interface",
+            .abstract => "abstract",
+            .synthetic => "synthetic",
+            .annotation => "annotation",
+            .@"enum" => "enum",
+            .module => "module",
+        };
+    }
 };
 
 pub const AccessFlagsFields = packed struct {
