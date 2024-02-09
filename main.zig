@@ -289,10 +289,6 @@ fn printVerbose(writer: Writer, cf: ClassFile, file_data: FileData) !void {
     try writer.print("{{\n", .{});
     var i: usize = 0;
     for (cf.fields.items) |field| {
-        if (std.mem.eql(u8, field.getName().bytes, "serialVersionUID")) {
-            continue;
-        }
-
         if (i > 0) {
             try writer.print("\n", .{});
         }
@@ -330,7 +326,8 @@ fn printField(writer: Writer, field: FieldInfo) !void {
         descriptor,
     });
 
-    try writer.print("    flags: (0x{X:0>4}) ", .{
+    // this one is lower case hedagits for some reason
+    try writer.print("    flags: (0x{x:0>4}) ", .{
         field.access_flags.value,
     });
 
@@ -339,7 +336,7 @@ fn printField(writer: Writer, field: FieldInfo) !void {
     while (iter.next()) |access_flag| {
         try writer.print("{s}", .{access_flag.name()});
         i += 1;
-        if (i < @popCount(field.access_flags.value)) {
+        if (i < field.access_flags.count()) {
             try writer.print(", ", .{});
         }
     }
@@ -415,11 +412,13 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
     });
 
     var iter = method.access_flags.iter();
+    var i: usize = 0;
     while (iter.next()) |flag| {
-        if (iter.index > 1) {
+        try writer.print("{s}", .{flag.name()});
+        i += 1;
+        if (i < method.access_flags.count()) {
             try writer.print(", ", .{});
         }
-        try writer.print("{s}", .{flag.name()});
     }
     try writer.print("\n", .{});
 
@@ -454,7 +453,7 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
                             try writer.print("      LocalVariableTable:\n", .{});
                             try writer.print("        Start  Length  Slot  Name   Signature\n", .{});
                             for (local_variable_table.variables) |local_variable| {
-                                try writer.print("         {: >4}  {: >6}  {: >4}  {s: >4}   {s: <9}\n", .{
+                                try writer.print("         {: >4}  {: >6}  {: >4}  {s: >4}   {s}\n", .{
                                     local_variable.start_pc,
                                     local_variable.length,
                                     local_variable.index,

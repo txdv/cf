@@ -69,6 +69,10 @@ pub const AccessFlags = packed union {
             .value = it.value,
         };
     }
+
+    pub fn count(it: AccessFlags) usize {
+        return @popCount(it.value);
+    }
 };
 
 constant_pool: *ConstantPool,

@@ -63,6 +63,10 @@ pub const AccessFlags = packed union {
             .value = it.value,
         };
     }
+
+    pub fn count(it: AccessFlags) usize {
+        return @popCount(it.value);
+    }
 };
 
 constant_pool: *ConstantPool,
@@ -83,7 +87,10 @@ pub fn getDescriptor(self: MethodInfo) ConstantPool.Utf8Info {
 pub fn format(self: MethodInfo, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     _ = fmt;
     _ = options;
-    try writer.print("MethodInfo({s} {s})", .{ self.getName().bytes, self.getDescriptor().bytes });
+    try writer.print("MethodInfo({s} {s})", .{
+        self.getName().bytes,
+        self.getDescriptor().bytes,
+    });
 }
 
 pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !MethodInfo {
