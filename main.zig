@@ -204,23 +204,25 @@ fn printArguments(writer: Writer, descriptor: []const u8) !void {
     try writer.print(")", .{});
 }
 
-fn argumentsCount(descriptor: []const u8) u32 {
-    var args_count: u32 = 0;
-    var i: usize = descriptor.len - 2;
-    while (i > 0 and descriptor[i] != '(') {
-        if (descriptor[i] == ';') {
-            const end = i;
-            while (descriptor[i] != 'L') {
-                i -= 1;
+fn argumentsCount(descriptor: []const u8) usize {
+    var i: usize = 1;
+    var count: usize = 0;
+    while (i < descriptor.len and descriptor[i] != ')') {
+        if (getSimpleType(descriptor[i])) |_| {
+            i += 1;
+            count += 1;
+        } else if (descriptor[i] == 'L') {
+            while (descriptor[i] != ';') {
+                i += 1;
             }
-            const start = i + 1;
-            const name = descriptor[start..end];
-            _ = name;
-            args_count += 1;
+            count += 1;
+            i += 1;
+        } else {
+            unreachable;
         }
-        i -= 1;
     }
-    return args_count;
+
+    return count;
 }
 
 fn printWithNamespace(writer: Writer, name: []const u8) !void {
@@ -416,10 +418,15 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
     for (method.attributes.items) |attribute| {
         switch (attribute) {
             .code => |code| {
+                var args_size = argumentsCount(method.getDescriptor().bytes);
+                if (!method.access_flags.flags.static) {
+                    args_size += 1;
+                }
+
                 try writer.print("    Code:\n      stack={}, locals={}, args_size={}\n", .{
                     code.max_stack,
                     code.max_locals,
-                    argumentsCount(method.getDescriptor().bytes),
+                    args_size,
                 });
 
                 try printMethodCode(writer, code, cf);
@@ -1051,4 +1058,11 @@ fn escape(name: []u8) []const u8 {
 test "getRetunType returns last element" {
     const result = getReturnType("([Ljava/lang/String;)V");
     try std.testing.expect(std.mem.eql(u8, result, "V"));
+}
+
+test "argumentsCount works with simple types" {
+    try std.testing.expectEqual(
+        1,
+        argumentsCount("(I)L/java/lang/Object;"),
+    );
 }
