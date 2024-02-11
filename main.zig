@@ -108,7 +108,11 @@ fn readString(cp: *ConstantPool, index: u16) []u8 {
 
 fn printClass(writer: Writer, cf: ClassFile) !void {
     const class_name = readString(cf.constant_pool, cf.this_class);
-    try writer.print("public class {s} {{\n", .{class_name});
+    try writer.print("public class {s} extends {d}", .{
+        class_name,
+        cf.this_class,
+    });
+    try writer.print(" {{\n", .{});
     for (cf.methods.items) |method| {
         printMethod(writer, class_name, method);
     }
@@ -125,6 +129,19 @@ fn isConstructor(name: []const u8) u8 {
     }
 }
 
+fn skipArguments(descriptor: []u8) []u8 {
+    var i: usize = 0;
+    while (i < descriptor.len and descriptor[i] != ')') {
+        i += 1;
+    }
+
+    if (i == descriptor.len - 1) {
+        return descriptor;
+    } else {
+        return descriptor[i + 1 .. descriptor.len];
+    }
+}
+
 fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
     const class_name = readString(cf.constant_pool, cf.this_class);
     var name = method.getName().bytes;
@@ -135,8 +152,14 @@ fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
     const is_constructor = isConstructor(name);
 
     if (is_constructor == 0) {
-        try printReturnType(writer, descriptor);
-        try writer.print(" ", .{});
+        if (findSignature(method.attributes)) |signatureAttribute| {
+            const signature = readString(cf.constant_pool, signatureAttribute.signature_index);
+            try printEscapedSignature(writer, skipArguments(signature));
+            try writer.print(" ", .{});
+        } else {
+            try printReturnType(writer, descriptor);
+            try writer.print(" ", .{});
+        }
     }
 
     if (is_constructor == 1) {
@@ -146,7 +169,7 @@ fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
         return;
     }
 
-    try writer.print("{s}", .{name});
+    try printWithNamespace(writer, name);
     try printArguments(writer, descriptor);
     try printExceptions(writer, cf.constant_pool, method);
     try writer.print(";\n", .{});
@@ -238,12 +261,16 @@ fn printWithNamespace(writer: Writer, name: []const u8) !void {
     var start = i;
     while (i < name.len) {
         if (name[i] == '/') {
-            try writer.print("{s}.", .{name[start..i]});
+            try writer.print("{s}.", .{
+                name[start..i],
+            });
             start = i + 1;
         }
         i += 1;
     }
-    try writer.print("{s}", .{name[start..i]});
+    try writer.print("{s}", .{
+        name[start..i],
+    });
 }
 
 fn printExceptions(writer: Writer, cp: *ConstantPool, methodInfo: MethodInfo) !void {
@@ -307,6 +334,16 @@ fn printVerbose(writer: Writer, cf: ClassFile, file_data: FileData) !void {
     try printFooter(writer, cf);
 }
 
+fn findSignature(attr: std.ArrayList(attributes.AttributeInfo)) ?attributes.SignatureAttribute {
+    for (attr.items) |attribute| {
+        switch (attribute) {
+            .signature => |signature| return signature,
+            else => {},
+        }
+    }
+    return null;
+}
+
 fn printField(writer: Writer, field: FieldInfo) !void {
     var iter = field.access_flags.iter();
     try writer.print("  ", .{});
@@ -341,6 +378,22 @@ fn printField(writer: Writer, field: FieldInfo) !void {
         }
     }
     try writer.print("\n", .{});
+
+    for (field.attributes.items) |attribute| {
+        switch (attribute) {
+            .constant_value => |constant_value| {
+                try writer.print("    ConstantValue: ", .{});
+                const constant = constant_value.constant_pool.get(constant_value.constantvalue_index);
+                switch (constant) {
+                    .long => |long| {
+                        try writer.print("long {}l", .{long.bytes});
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
 }
 
 fn printSimpleType(writer: Writer, jtype: u8) !void {
@@ -765,14 +818,27 @@ fn printHeader(writer: Writer, cf: ClassFile, file_data: FileData) !void {
     if (findSourceFile(cf)) |source_file| {
         try writer.print("  Compiled from \"{s}\"\n", .{source_file});
     }
-    const className = readString(cf.constant_pool, cf.this_class);
     var iter = cf.access_flags.iter();
     while (iter.next()) |flag| {
         if (flag != .super) {
             try writer.print("{s} ", .{@tagName(flag)});
         }
     }
-    try writer.print("class {s}\n", .{className});
+    try writer.print("class ", .{});
+    const className = readString(cf.constant_pool, cf.this_class);
+    try printEscapedSignature(writer, className);
+
+    if (findSignature(cf.attributes)) |signatureAttribute| {
+        const signature = readString(cf.constant_pool, signatureAttribute.signature_index);
+        try writer.print(" extends ", .{});
+        try printEscapedSignature(writer, signature);
+        try writer.print("\n", .{});
+    } else if (cf.super_class) |super_class| {
+        const superClass = readString(cf.constant_pool, super_class);
+        try writer.print(" extends \n", .{});
+        try printEscapedSignature(writer, superClass);
+        try writer.print("\n", .{});
+    }
     try writer.print("  minor version: {}\n", .{cf.minor_version});
     try writer.print("  major version: {}\n", .{cf.major_version});
     try writer.print("  flags: (0x{X:0>4}) ", .{cf.access_flags.value});
@@ -801,6 +867,30 @@ fn printHeader(writer: Writer, cf: ClassFile, file_data: FileData) !void {
         cf.fields.items.len,
         cf.methods.items.len,
         cf.attributes.items.len,
+    });
+}
+
+fn printEscapedSignature(writer: Writer, signature: []u8) !void {
+    var i: usize = 0;
+    var start = i;
+    while (i < signature.len) {
+        if (signature[i] == '/' or signature[i] == ';' or signature[i] == 'L') {
+            if (signature[i] == 'L' and start == i) {
+                start = i + 1;
+            } else {
+                try writer.print("{s}", .{
+                    signature[start..i],
+                });
+                if (signature[i] == '/') {
+                    try writer.print(".", .{});
+                }
+                start = i + 1;
+            }
+        }
+        i += 1;
+    }
+    try writer.print("{s}", .{
+        signature[start..i],
     });
 }
 
