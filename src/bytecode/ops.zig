@@ -589,7 +589,9 @@ pub const Operation = union(Opcode) {
 
     pub fn sizeOf(self: Operation) usize {
         inline for (std.meta.fields(Operation)) |op| {
-            if (@intFromEnum(std.meta.stringToEnum(Opcode, op.name).?) == @intFromEnum(self)) {
+            @setEvalBranchQuota(100000);
+            const left = comptime @intFromEnum(std.meta.stringToEnum(Opcode, op.name).?);
+            if (left == @intFromEnum(self)) {
                 return 1 + if (op.type == void) 0 else @sizeOf(op.type);
             }
         }
@@ -621,7 +623,8 @@ pub const Operation = union(Opcode) {
             }
 
             inline for (widenable) |op| {
-                if (@intFromEnum(op) == widened_opcode) {
+                const int = comptime @intFromEnum(op);
+                if (int == widened_opcode) {
                     return @unionInit(Operation, @tagName(op), try reader.readInt(u16, .big));
                 }
             }
@@ -637,7 +640,9 @@ pub const Operation = union(Opcode) {
             }
 
             inline for (std.meta.fields(Operation)) |op| {
-                if (@intFromEnum(std.meta.stringToEnum(Opcode, op.name).?) == opcode) {
+                @setEvalBranchQuota(100000);
+                const left = comptime @intFromEnum(std.meta.stringToEnum(Opcode, op.name).?);
+                if (left == opcode) {
                     return @unionInit(Operation, op.name, if (op.type == void) {} else if (@typeInfo(op.type) == .Struct) z: {
                         break :z if (@hasDecl(op.type, "decode")) try @field(op.type, "decode")(allocator, reader) else unreachable;
                     } else if (@typeInfo(op.type) == .Enum) try reader.readEnum(op.type, .big) else if (@typeInfo(op.type) == .Int) try reader.readInt(op.type, .big) else unreachable);
