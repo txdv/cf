@@ -23,12 +23,6 @@ pub fn get(self: *const ConstantPool, index: u16) Entry {
 }
 
 pub fn deinit(self: *ConstantPool) void {
-    for (self.entries.items) |entry| {
-        switch (entry) {
-            .utf8 => |info| self.allocator.free(info.bytes),
-            else => {},
-        }
-    }
     self.entries.deinit(self.allocator);
     self.utf8_entries_map.deinit(self.allocator);
     self.allocator.destroy(self);

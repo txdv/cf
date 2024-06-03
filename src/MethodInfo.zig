@@ -35,6 +35,23 @@ pub const AccessFlagsValue = enum(u16) {
             .synthetic => "ACC_SYNTHETIC",
         };
     }
+
+    pub fn keyword(flag: AccessFlagsValue) []const u8 {
+        return switch (flag) {
+            .public => "public",
+            .private => "private",
+            .protected => "protected",
+            .static => "static",
+            .final => "final",
+            .synchronized => "synchronized",
+            .bridge => "bridge",
+            .varargs => "vargargs",
+            .native => "native",
+            .abstract => "abstract",
+            .strict => "strict",
+            .synthetic => "synthetic",
+        };
+    }
 };
 
 pub const AccessFlagsFields = packed struct {

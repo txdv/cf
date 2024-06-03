@@ -177,20 +177,9 @@ fn printMethod(writer: Writer, cf: ClassFile, method: MethodInfo) !void {
 
 fn printModifiers(writer: Writer, method: MethodInfo) !void {
     try writer.print("  ", .{});
-    if (method.access_flags.flags.public) {
-        try writer.print("public ", .{});
-    }
-    if (method.access_flags.flags.private) {
-        try writer.print("private ", .{});
-    }
-    if (method.access_flags.flags.protected) {
-        try writer.print("protected ", .{});
-    }
-    if (method.access_flags.flags.static) {
-        try writer.print("static ", .{});
-    }
-    if (method.access_flags.flags.final) {
-        try writer.print("final ", .{});
+    var iter = method.access_flags.iter();
+    while (iter.next()) |access_flag| {
+        try writer.print("{s} ", .{access_flag.keyword()});
     }
 }
 
@@ -248,7 +237,17 @@ fn argumentsCount(descriptor: []const u8) usize {
             }
             count += 1;
             i += 1;
+        } else if (descriptor[i] == '[') {
+            i += 1;
         } else {
+            std.debug.print(
+                "\n\n\ni = {d}, count = {d}: {s}\n",
+                .{
+                    i,
+                    count,
+                    descriptor,
+                },
+            );
             unreachable;
         }
     }
@@ -452,7 +451,10 @@ fn printNormalizedType(writer: Writer, descriptor: []const u8) !void {
             try writer.print("{s}", .{
                 descriptor[start..i],
             });
+        } else if (descriptor[0] == '[') {
+            try writer.print("[]", .{});
         } else {
+            std.debug.print("\n{s}", .{descriptor});
             unreachable;
         }
     }
@@ -547,8 +549,12 @@ fn printMethodDetailed(writer: Writer, cf: ClassFile, method: MethodInfo) !void 
                 try writer.print("    ", .{});
                 try printSignature(writer, signature);
             },
+            .deprecated => |_| {
+                try writer.print("    Deprecated: true\n", .{});
+                //try writer.print("deprecated_here", .{});
+            },
             else => |other| {
-                std.debug.print("{any}", .{other});
+                std.debug.print("\n\n\n{any}", .{other});
                 unreachable;
             },
         }
@@ -571,6 +577,8 @@ pub const OpType = enum {
     iinc,
     branch,
     branch_wide,
+    invoke_interface,
+    invoke_dynamic,
     empty,
 };
 
@@ -583,6 +591,8 @@ pub const OperationType = union(OpType) {
     iinc: ops.IincParams,
     branch: ops.BranchToOffsetOperation,
     branch_wide: ops.BranchToOffsetWideOperation,
+    invoke_interface: ops.InvokeInterfaceParams,
+    invoke_dynamic: ops.InvokeDynamicParams,
     empty: u0,
 
     pub fn fromOperation(op: Operation) OperationType {
@@ -656,8 +666,12 @@ pub const OperationType = union(OpType) {
             },
             .tableswitch => unreachable,
             .lookupswitch => unreachable,
-            .invokeinterface => unreachable,
-            .invokedynamic => unreachable,
+            .invokeinterface => |invokeinterface| {
+                return OperationType{ .invoke_interface = invokeinterface };
+            },
+            .invokedynamic => |invokedynamic| {
+                return OperationType{ .invoke_dynamic = invokedynamic };
+            },
             .newarray => unreachable,
             .multianewarray => unreachable,
             else => return OperationType{ .empty = 0 },
@@ -787,8 +801,11 @@ fn printDetailed(writer: Writer, cf: ClassFile, constant: Entry) !void {
                 integer.bytes,
             });
         },
+        .interface_methodref => {
+            try writer.print("detailed_interface_method\n", .{});
+        },
         else => {
-            std.debug.print("{any}", .{constant});
+            std.debug.print("\n\n\n\n{any}", .{constant});
             unreachable;
         },
     }
@@ -835,8 +852,10 @@ fn printHeader(writer: Writer, cf: ClassFile, file_data: FileData) !void {
         try writer.print("\n", .{});
     } else if (cf.super_class) |super_class| {
         const superClass = readString(cf.constant_pool, super_class);
-        try writer.print(" extends \n", .{});
-        try printEscapedSignature(writer, superClass);
+        if (!std.mem.eql(u8, superClass, "java/lang/Object")) {
+            try writer.print(" extends ", .{});
+            try printEscapedSignature(writer, superClass);
+        }
         try writer.print("\n", .{});
     }
     try writer.print("  minor version: {}\n", .{cf.minor_version});
@@ -1009,7 +1028,7 @@ fn printFooter(writer: Writer, cf: ClassFile) !void {
     }
 }
 
-fn intAsStringLength(number: u16) usize {
+fn intAsStringLength(number: u64) usize {
     var count: usize = 0;
     var rest = number;
     while (rest > 0) {
@@ -1023,10 +1042,16 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
     try writer.print("Constant pool:\n", .{});
     var buffer: [100]u8 = undefined;
     var i: usize = 0;
+    const prefixLength = 2 + intAsStringLength(cf.constant_pool.entries.items.len + 1);
+
     while (i < cf.constant_pool.entries.items.len) {
         const constant = cf.constant_pool.entries.items[i];
-        const is = try std.fmt.bufPrint(buffer[0..], "#{}", .{i + 1});
-        try writer.print("{s:5} = ", .{is});
+        const fill = prefixLength - intAsStringLength(i + 1);
+        for (0..fill) |_| {
+            try writer.print(" ", .{});
+        }
+        try writer.print("#{d} = ", .{i + 1});
+
         switch (constant) {
             .class => |class| {
                 const name = "Class";
@@ -1087,6 +1112,18 @@ fn printConstantPool(writer: Writer, cf: ClassFile) !void {
             .integer => |integer| {
                 const name = "Integer";
                 try writer.print("{s: <18} {d}\n", .{ name, integer.bytes });
+            },
+            .interface_methodref => {
+                try writer.print("interface_methodref\n", .{});
+            },
+            .method_type => {
+                try writer.print("method_type\n", .{});
+            },
+            .method_handle => {
+                try writer.print("method_handle\n", .{});
+            },
+            .invoke_dynamic => {
+                try writer.print("invoke_dynamic\n", .{});
             },
             else => |other| {
                 std.debug.print(": {any}", .{other});
