@@ -841,14 +841,14 @@ fn printHeader(writer: Writer, cf: ClassFile, file_data: FileData) !void {
             try writer.print("{s} ", .{@tagName(flag)});
         }
     }
+    // TODO: handle class differently, this is interfaces
     try writer.print("class ", .{});
     const className = readString(cf.constant_pool, cf.this_class);
     try printEscapedSignature(writer, className);
 
     if (findSignature(cf.attributes)) |signatureAttribute| {
         const signature = readString(cf.constant_pool, signatureAttribute.signature_index);
-        try writer.print(" extends ", .{});
-        try printEscapedSignature(writer, signature);
+        try printClassExtends(writer, signature);
         try writer.print("\n", .{});
     } else if (cf.super_class) |super_class| {
         const superClass = readString(cf.constant_pool, super_class);
@@ -889,7 +889,90 @@ fn printHeader(writer: Writer, cf: ClassFile, file_data: FileData) !void {
     });
 }
 
-fn printEscapedSignature(writer: Writer, signature: []u8) !void {
+const ParseError = error{
+    UnexpectedChar,
+};
+
+fn printClassExtends(writer: anytype, signature: []u8) !void {
+    var i: usize = 0;
+    var start = i;
+    if (signature[0] != '<') {
+        return;
+    }
+
+    i += 1;
+    start += 1;
+
+    _ = try writer.write("<");
+
+    while (i < signature.len and signature[i] != '>') {
+        if (i > 1) {
+            try writer.print(", ", .{});
+        }
+        try printGeneric(writer, signature, &i);
+
+        try writer.print(" extends ", .{});
+
+        try printType(writer, signature, &i);
+    }
+    i += 1;
+
+    _ = try writer.write("> extends ");
+    try printType(writer, signature, &i);
+}
+
+fn printGeneric(writer: anytype, signature: []u8, i: *usize) !void {
+    const start = i.*;
+
+    while (signature[i.*] != ':') {
+        i.* += 1;
+    }
+    try writer.print("{s}", .{
+        signature[start..i.*],
+    });
+
+    i.* += 1;
+}
+
+fn printType(writer: anytype, signature: []u8, i: *usize) !void {
+    if (signature[i.*] == 'L') {
+        i.* += 1;
+    } else {
+        std.debug.print("{} {s}", .{
+            i.*,
+            signature[i.*..],
+        });
+        unreachable;
+    }
+
+    var start = i.*;
+    while (i.* < signature.len) {
+        switch (signature[i.*]) {
+            '/' => {
+                try writer.print("{s}.", .{
+                    signature[start..i.*],
+                });
+                start = i.* + 1;
+            },
+            ';' => {
+                try writer.print("{s}", .{
+                    signature[start..i.*],
+                });
+                start = i.* + 1;
+                i.* += 1;
+                break;
+            },
+            else => {},
+        }
+        i.* += 1;
+    }
+
+    try writer.print("{s}", .{
+        signature[start..i.*],
+    });
+}
+
+fn printEscapedSignature(writer: anytype, signature: []u8) !void {
     var i: usize = 0;
     var start = i;
     while (i < signature.len) {
@@ -1198,5 +1281,52 @@ test "argumentsCount works with simple types" {
     try std.testing.expectEqual(
         1,
         argumentsCount("(I)L/java/lang/Object;"),
+    );
+}
+
+const ArrayList = std.ArrayList;
+const test_allocator = std.testing.allocator;
+const expect = std.testing.expect;
+const eql = std.mem.eql;
+
+test "printEscapedSignature with main" {
+    var list = ArrayList(u8).init(test_allocator);
+    const writer = list.writer();
+    defer list.deinit();
+    const a: []u8 = try test_allocator.dupe(u8, "Main");
+    defer test_allocator.free(a);
+
+    try printEscapedSignature(writer, a);
+
+    try std.testing.expectEqualStrings(list.items, "Main");
+}
+
+test "printEscapedSignature with main with generic type" {
+    var list = ArrayList(u8).init(test_allocator);
+    const writer = list.writer();
+    defer list.deinit();
+    const a: []u8 = try test_allocator.dupe(u8, "<T:Ljava/lang/Number;>Ljava/lang/Object;");
+    defer test_allocator.free(a);
+
+    try printClassExtends(writer, a);
+
+    try std.testing.expectEqualStrings(
+        "<T extends java.lang.Number> extends java.lang.Object",
+        list.items,
+    );
+}
+
+test "printClassExtends with two generic types" {
+    var list = ArrayList(u8).init(test_allocator);
+    const writer = list.writer();
+    defer list.deinit();
+    const a: []u8 = try test_allocator.dupe(u8, "<T:Ljava/lang/Number;G:Ljava/lang/Number;>Ljava/lang/Object");
+    defer test_allocator.free(a);
+
+    try printClassExtends(writer, a);
+
+    try std.testing.expectEqualStrings(
+        "<T extends java.lang.Number, G extends java.lang.Number> extends java.lang.Object",
+        list.items,
     );
 }
