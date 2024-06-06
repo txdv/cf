@@ -51,28 +51,28 @@ pub const AccessFlagsValue = enum(u16) {
     }
 };
 
-pub const AccessFlagsFields = packed struct {
+pub const AccessFlagsFields = packed struct(u16) {
     /// Declared public; may be accessed from outside its package
-    public: bool = false,
-    unused1: u3 = 0,
+    public: bool = false, // 1
+    unused1: u3 = 0, // 4
     /// Declared final; no subclasses allowed.
-    final: bool = false,
+    final: bool = false, // 5
     /// Treat superclass methods specially when invoked by the invokespecial instruction
-    super: bool = false,
+    super: bool = false, // 6
     /// Is an interface, not a class
-    interface: bool = false,
-    unused2: u3 = 0,
+    unused2: u3 = 0, // 9
+    interface: bool = false, // 10
     /// Declared abstract; must not be instantiated
-    abstract: bool = false,
+    abstract: bool = false, // 11
     /// Declared synthetic; not present in the source code
-    synthetic: bool = false,
-    unused3: u1 = 0,
+    synthetic: bool = false, // 12
+    unused3: u1 = 0, // 13
     /// Declared as an annotation interface
-    annotation: bool = false,
+    annotation: bool = false, // 14
     /// Declared as an enum class
-    enum_class: bool = false,
+    enum_class: bool = false, // 15
     /// Is a module, not a class or interface
-    module: bool = false,
+    module: bool = false, // 16
 };
 
 const AccessFlagsIter = utils.EnumIter(AccessFlagsValue);

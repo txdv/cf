@@ -835,14 +835,16 @@ fn printHeader(writer: Writer, cf: ClassFile, file_data: FileData) !void {
     if (findSourceFile(cf)) |source_file| {
         try writer.print("  Compiled from \"{s}\"\n", .{source_file});
     }
-    var iter = cf.access_flags.iter();
-    while (iter.next()) |flag| {
-        if (flag != .super) {
-            try writer.print("{s} ", .{@tagName(flag)});
-        }
+    if (cf.access_flags.flags.public) {
+        try writer.print("public ", .{});
     }
-    // TODO: handle class differently, this is interfaces
-    try writer.print("class ", .{});
+    if (cf.access_flags.flags.interface) {
+        try writer.print("interface ", .{});
+    } else if (cf.access_flags.flags.abstract) {
+        try writer.print("abstract ", .{});
+    } else {
+        try writer.print("class ", .{});
+    }
     const className = readString(cf.constant_pool, cf.this_class);
     try printEscapedSignature(writer, className);
 
@@ -918,6 +920,7 @@ fn printClassExtends(writer: anytype, signature: []u8) !void {
     i += 1;
 
     _ = try writer.write("> extends ");
+    skipType(signature, &i);
     try printType(writer, signature, &i);
 }
 
@@ -931,6 +934,13 @@ fn printGeneric(writer: anytype, signature: []u8, i: *usize) !void {
         signature[start..i.*],
     });
 
+    i.* += 1;
+}
+
+fn skipType(signature: []u8, i: *usize) void {
+    while (signature[i.*] != ';') {
+        i.* += 1;
+    }
     i.* += 1;
 }
 
