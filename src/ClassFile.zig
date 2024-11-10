@@ -178,7 +178,7 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
     };
 }
 
-pub fn encode(self: *const ClassFile, writer: anytype) !void {
+pub fn encode(self: *const ClassFile, writer: anytype, constant_pool: *ConstantPool) !void {
     try writer.writeInt(u32, 0xCAFEBABE, .big);
 
     try writer.writeInt(u16, self.minor_version, .big);
@@ -222,11 +222,11 @@ pub fn encode(self: *const ClassFile, writer: anytype) !void {
 
     const methods_len = @as(u16, @intCast(self.methods.items.len));
     try writer.writeInt(u16, methods_len, .big);
-    for (self.methods.items) |m| try m.encode(writer);
+    for (self.methods.items) |m| try m.encode(writer, constant_pool);
 
     const attributes_len = @as(u16, @intCast(self.attributes.items.len));
     try writer.writeInt(u16, attributes_len, .big);
-    for (self.attributes.items) |a| try a.encode(writer);
+    for (self.attributes.items) |a| try a.encode(writer, constant_pool);
 }
 
 pub fn deinit(self: *ClassFile) void {
@@ -290,10 +290,10 @@ test "Encode ClassFile" {
     var cf = try ClassFile.decode(std.testing.allocator, reader);
     defer cf.deinit();
 
-    try cf.encode(joe_file.writer());
+    try cf.encode(joe_file.writer(), cf.constant_pool);
 
     var end_result: [harness.hello.data.len]u8 = undefined;
     var res_fbs = std.io.fixedBufferStream(&end_result);
-    try cf.encode(res_fbs.writer());
+    try cf.encode(res_fbs.writer(), cf.constant_pool);
     try std.testing.expectEqualSlices(u8, harness.hello.data, &end_result);
 }

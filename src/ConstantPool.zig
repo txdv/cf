@@ -223,6 +223,11 @@ pub const Utf8Info = struct {
         _ = options;
         try writer.print("Utf8Info(\"{s}\")", .{value.bytes});
     }
+
+    pub fn deinit(self: *Utf8Info) void {
+        try self.constant_pool.allocator.dealloc(self.bytes);
+
+    }
 };
 
 pub const ReferenceKind = enum(u8) {

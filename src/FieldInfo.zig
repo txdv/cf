@@ -138,7 +138,7 @@ pub fn encode(self: FieldInfo, writer: anytype) !void {
 
     const attributes_len = @as(u16, @intCast(self.attributes.items.len));
     try writer.writeInt(u16, attributes_len, .big);
-    for (self.attributes.items) |*att| try att.encode(writer);
+    for (self.attributes.items) |*att| try att.encode(writer, self.constant_pool);
 }
 
 pub fn deinit(self: FieldInfo) void {

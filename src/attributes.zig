@@ -78,17 +78,17 @@ pub const AttributeInfo = union(enum) {
         }
     }
 
-    pub fn encode(self: AttributeInfo, writer: anytype) !void {
+    pub fn encode(self: AttributeInfo, writer: anytype, constant_pool: *ConstantPool) !void {
         inline for (std.meta.fields(AttributeInfo)) |field| {
             if (field.type == void) continue;
 
             if (std.meta.activeTag(self) == @field(std.meta.Tag(AttributeInfo), field.name)) {
                 var attr = @field(self, field.name);
 
-                try writer.writeInt(u16, try attr.constant_pool.locateUtf8Entry(@field(field.type, "name")), .big);
+                try writer.writeInt(u16, try constant_pool.locateUtf8Entry(@field(field.type, "name")), .big);
                 try writer.writeInt(u32, attr.calcAttrLen(), .big);
 
-                try attr.encode(writer);
+                try attr.encode(writer, constant_pool);
             }
         }
     }
@@ -183,7 +183,7 @@ pub const CodeAttribute = struct {
         return len;
     }
 
-    pub fn encode(self: CodeAttribute, writer: anytype) anyerror!void {
+    pub fn encode(self: CodeAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
         try writer.writeInt(u16, self.max_stack, .big);
         try writer.writeInt(u16, self.max_locals, .big);
 
@@ -194,7 +194,7 @@ pub const CodeAttribute = struct {
         for (self.exception_table.items) |et| try et.encode(writer);
 
         try writer.writeInt(u16, @as(u16, @intCast(self.attributes.items.len)), .big);
-        for (self.attributes.items) |at| try at.encode(writer);
+        for (self.attributes.items) |at| try at.encode(writer, constant_pool);
     }
 
     pub fn deinit(self: *CodeAttribute) void {
@@ -254,7 +254,8 @@ pub const LineNumberTableAttribute = struct {
         return len;
     }
 
-    pub fn encode(self: LineNumberTableAttribute, writer: anytype) anyerror!void {
+    pub fn encode(self: LineNumberTableAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = constant_pool;
         try writer.writeInt(u16, @as(u16, @intCast(self.line_number_table.items.len)), .big);
         for (self.line_number_table.items) |entry| try entry.encode(writer);
     }
@@ -286,7 +287,8 @@ pub const SourceFileAttribute = struct {
         return 2;
     }
 
-    pub fn encode(self: SourceFileAttribute, writer: anytype) anyerror!void {
+    pub fn encode(self: SourceFileAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = constant_pool;
         try writer.writeInt(u16, self.source_file_index, .big);
     }
 
@@ -323,7 +325,8 @@ pub const ExceptionsAttribute = struct {
         return len;
     }
 
-    pub fn encode(self: ExceptionsAttribute, writer: anytype) anyerror!void {
+    pub fn encode(self: ExceptionsAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = constant_pool;
         try writer.writeInt(u16, @as(u16, @intCast(self.exception_index_table.items.len)), .big);
         for (self.exception_index_table.items) |entry| try writer.writeInt(u16, entry, .big);
     }
@@ -386,6 +389,14 @@ pub const MethodParametersAttribute = struct {
     allocator: std.mem.Allocator,
     parameters: std.ArrayListUnmanaged(MethodParameter),
 
+    pub fn encode(self: MethodParametersAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = self;
+        _ = writer;
+        _ = constant_pool;
+
+        unreachable; // TODO: implement
+    }
+
     pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !Self {
         _ = constant_pool;
 
@@ -403,6 +414,12 @@ pub const MethodParametersAttribute = struct {
     pub fn deinit(self: *Self) void {
         _ = self;
     }
+
+    pub fn calcAttrLen(self: MethodParametersAttribute) u32 {
+        _ = self;
+
+        unreachable; // TODO: implement
+    }
 };
 
 pub const UnknownAttribute = struct {
@@ -413,11 +430,21 @@ pub const UnknownAttribute = struct {
     unknown_name: []const u8,
     data: []const u8,
 
+
+    pub fn encode(self: UnknownAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = self;
+        _ = writer;
+        _ = constant_pool;
+
+        unreachable; // TODO: implement
+    }
+
     pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !Self {
         _ = reader;
         _ = allocator;
         _ = constant_pool;
-        unreachable;
+
+        unreachable; // TODO: implement
     }
 
     pub fn decode_unknown(unknown_name: []u8, allocator: std.mem.Allocator, reader: anytype) !Self {
@@ -430,6 +457,12 @@ pub const UnknownAttribute = struct {
 
     pub fn deinit(self: *Self) void {
         _ = self;
+    }
+
+    pub fn calcAttrLen(self: UnknownAttribute) u32 {
+        _ = self;
+
+        unreachable; // TODO: implement
     }
 };
 
@@ -455,7 +488,8 @@ pub const ConstantValueAttribute = struct {
         return 2;
     }
 
-    pub fn encode(self: ConstantValueAttribute, writer: anytype) anyerror!void {
+    pub fn encode(self: ConstantValueAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = constant_pool;
         try writer.writeInt(u16, self.constantvalue_index, .big);
     }
 
@@ -483,9 +517,10 @@ pub const DeprecatedAttribute = struct {
         return 0;
     }
 
-    pub fn encode(self: DeprecatedAttribute, writer: anytype) anyerror!void {
+    pub fn encode(self: DeprecatedAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
         _ = self;
         _ = writer;
+        _ = constant_pool;
     }
 
     pub fn deinit(self: *DeprecatedAttribute) void {
@@ -701,7 +736,8 @@ pub const RuntimeVisibleAnnotationsAttribute = struct {
         return len;
     }
 
-    pub fn encode(self: RuntimeVisibleAnnotationsAttribute, writer: anytype) anyerror!void {
+    pub fn encode(self: RuntimeVisibleAnnotationsAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = constant_pool;
         try writer.writeInt(u16, self.num_annotations, .big);
         for (self.annotations) |annotation| try annotation.encode(writer);
     }
@@ -727,6 +763,14 @@ pub const LocalVariableTableAttribute = struct {
 
     pub const name = "LocalVariableTable";
 
+    pub fn encode(self: LocalVariableTableAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = self;
+        _ = writer;
+        _ = constant_pool;
+
+        unreachable; // TODO: implement
+    }
+
     pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !LocalVariableTableAttribute {
         const length = try reader.readInt(u16, .big);
         const variables = try allocator.alloc(LocalVariable, length);
@@ -751,6 +795,12 @@ pub const LocalVariableTableAttribute = struct {
     pub fn deinit(self: *LocalVariableTableAttribute) void {
         _ = self;
     }
+
+    pub fn calcAttrLen(self: LocalVariableTableAttribute) u32 {
+        _ = self;
+
+        unreachable; // TODO: implement
+    }
 };
 
 pub const SignatureAttribute = struct {
@@ -759,6 +809,14 @@ pub const SignatureAttribute = struct {
     signature_index: u16,
 
     pub const name = "Signature";
+
+    pub fn encode(self: SignatureAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = self;
+        _ = writer;
+        _ = constant_pool;
+
+        unreachable; // TODO: implement
+    }
 
     pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !SignatureAttribute {
         return SignatureAttribute{
@@ -770,6 +828,12 @@ pub const SignatureAttribute = struct {
 
     pub fn deinit(self: *SignatureAttribute) void {
         _ = self;
+    }
+
+    pub fn calcAttrLen(self: SignatureAttribute) u32 {
+        _ = self;
+
+        unreachable; // TODO: implement
     }
 };
 
@@ -786,6 +850,14 @@ pub const InnerClassesAttribute = struct {
     inner_classes: []InnerClass,
 
     pub const name = "InnerClasses";
+
+    pub fn encode(self: InnerClassesAttribute, writer: anytype, constant_pool: *ConstantPool) anyerror!void {
+        _ = self;
+        _ = writer;
+        _ = constant_pool;
+
+        unreachable; // TODO: implement
+    }
 
     pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader: anytype) !InnerClassesAttribute {
         const length = try reader.readInt(u16, .big);
@@ -812,5 +884,11 @@ pub const InnerClassesAttribute = struct {
 
     pub fn deinit(self: *InnerClassesAttribute) void {
         _ = self;
+    }
+
+    pub fn calcAttrLen(self: InnerClassesAttribute) u32 {
+        _ = self;
+
+        unreachable; // TODO: implement
     }
 };

@@ -132,14 +132,14 @@ pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader
     };
 }
 
-pub fn encode(self: MethodInfo, writer: anytype) !void {
+pub fn encode(self: MethodInfo, writer: anytype, constant_pool: *ConstantPool) !void {
     try writer.writeInt(u16, self.access_flags.value, .big);
 
     try writer.writeInt(u16, self.name_index, .big);
     try writer.writeInt(u16, self.descriptor_index, .big);
 
     try writer.writeInt(u16, @as(u16, @intCast(self.attributes.items.len)), .big);
-    for (self.attributes.items) |*att| try att.encode(writer);
+    for (self.attributes.items) |*att| try att.encode(writer, constant_pool);
 }
 
 pub fn deinit(self: MethodInfo) void {
