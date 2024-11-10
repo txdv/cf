@@ -122,15 +122,15 @@ pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader
 
 pub fn encode(self: FieldInfo, writer: anytype) !void {
     var access_flags_u: u16 = 0;
-    if (self.access_flags.public) utils.setPresent(u16, &access_flags_u, 0x0001);
-    if (self.access_flags.private) utils.setPresent(u16, &access_flags_u, 0x0002);
-    if (self.access_flags.protected) utils.setPresent(u16, &access_flags_u, 0x0004);
-    if (self.access_flags.static) utils.setPresent(u16, &access_flags_u, 0x0008);
-    if (self.access_flags.final) utils.setPresent(u16, &access_flags_u, 0x0010);
-    if (self.access_flags.@"volatile") utils.setPresent(u16, &access_flags_u, 0x0040);
-    if (self.access_flags.transient) utils.setPresent(u16, &access_flags_u, 0x0080);
-    if (self.access_flags.synthetic) utils.setPresent(u16, &access_flags_u, 0x1000);
-    if (self.access_flags.enum_member) utils.setPresent(u16, &access_flags_u, 0x4000);
+    if (self.access_flags.flags.public) utils.setPresent(u16, &access_flags_u, 0x0001);
+    if (self.access_flags.flags.private) utils.setPresent(u16, &access_flags_u, 0x0002);
+    if (self.access_flags.flags.protected) utils.setPresent(u16, &access_flags_u, 0x0004);
+    if (self.access_flags.flags.static) utils.setPresent(u16, &access_flags_u, 0x0008);
+    if (self.access_flags.flags.final) utils.setPresent(u16, &access_flags_u, 0x0010);
+    if (self.access_flags.flags.@"volatile") utils.setPresent(u16, &access_flags_u, 0x0040);
+    if (self.access_flags.flags.transient) utils.setPresent(u16, &access_flags_u, 0x0080);
+    if (self.access_flags.flags.synthetic) utils.setPresent(u16, &access_flags_u, 0x1000);
+    if (self.access_flags.flags.enum_member) utils.setPresent(u16, &access_flags_u, 0x4000);
     try writer.writeInt(u16, access_flags_u, .big);
 
     try writer.writeInt(u16, self.name_index, .big);

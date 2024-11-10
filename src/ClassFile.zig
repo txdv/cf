@@ -198,15 +198,15 @@ pub fn encode(self: *const ClassFile, writer: anytype) !void {
     }
 
     var access_flags_u: u16 = 0;
-    if (self.access_flags.public) utils.setPresent(u16, &access_flags_u, 0x0001);
-    if (self.access_flags.final) utils.setPresent(u16, &access_flags_u, 0x0010);
-    if (self.access_flags.super) utils.setPresent(u16, &access_flags_u, 0x0020);
-    if (self.access_flags.interface) utils.setPresent(u16, &access_flags_u, 0x0200);
-    if (self.access_flags.abstract) utils.setPresent(u16, &access_flags_u, 0x0400);
-    if (self.access_flags.synthetic) utils.setPresent(u16, &access_flags_u, 0x1000);
-    if (self.access_flags.annotation) utils.setPresent(u16, &access_flags_u, 0x2000);
-    if (self.access_flags.enum_class) utils.setPresent(u16, &access_flags_u, 0x4000);
-    if (self.access_flags.module) utils.setPresent(u16, &access_flags_u, 0x8000);
+    if (self.access_flags.flags.public) utils.setPresent(u16, &access_flags_u, 0x0001);
+    if (self.access_flags.flags.final) utils.setPresent(u16, &access_flags_u, 0x0010);
+    if (self.access_flags.flags.super) utils.setPresent(u16, &access_flags_u, 0x0020);
+    if (self.access_flags.flags.interface) utils.setPresent(u16, &access_flags_u, 0x0200);
+    if (self.access_flags.flags.abstract) utils.setPresent(u16, &access_flags_u, 0x0400);
+    if (self.access_flags.flags.synthetic) utils.setPresent(u16, &access_flags_u, 0x1000);
+    if (self.access_flags.flags.annotation) utils.setPresent(u16, &access_flags_u, 0x2000);
+    if (self.access_flags.flags.enum_class) utils.setPresent(u16, &access_flags_u, 0x4000);
+    if (self.access_flags.flags.module) utils.setPresent(u16, &access_flags_u, 0x8000);
     try writer.writeInt(u16, access_flags_u, .big);
 
     try writer.writeInt(u16, self.this_class, .big);
