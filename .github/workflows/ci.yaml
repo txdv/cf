@@ -6,4 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: curl -O https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.2198+e5f5229fd.tar.xz
+      - run: curl -O --silent https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.2198+e5f5229fd.tar.xz
+      - run: tar xzf zig-linux-x86_64-0.14.0-dev.2198+e5f5229fd.tar.xz
+      - run: export PATH=$(PWD)/zig-linux-x86_64-0.14.0-dev.2198+e5f5229fd:$PATH
+      - run: zig build
