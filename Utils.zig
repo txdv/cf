@@ -35,3 +35,22 @@ pub fn getFilename() []const u8 {
     const filename_length = std.mem.len(filename);
     return filename[0..filename_length];
 }
+
+pub fn printHex(data: []u8) !void {
+    const stdout = std.io.getStdOut().writer();
+    for (data, 0..) |d, i| {
+        if (i > 0 and i % 16 == 0) {
+            _ = try stdout.print("\n", .{});
+        } else if (i > 0 and i % 8 == 0) {
+            _ = try stdout.print("  ", .{});
+        } else if (i > 0) {
+            _ = try stdout.print(" ", .{});
+        }
+
+        if (i % 16 == 0) {
+            _ = try stdout.print("0x{X:0>4}: ", .{i});
+        }
+        _ = try stdout.print("{X:0>2}", .{d});
+    }
+    _ = try stdout.print("\n", .{});
+}

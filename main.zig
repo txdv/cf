@@ -19,7 +19,6 @@ const Allocator = std.mem.Allocator;
 const Utils = @import("Utils.zig");
 const FileData = Utils.FileData;
 
-
 pub fn main() !void {
     const out = std.io.getStdOut().writer();
     var buf = std.io.bufferedWriter(out);
