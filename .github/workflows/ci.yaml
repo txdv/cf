@@ -1,0 +1,9 @@
+name: ci
+run-name: run tests
+on: [push]
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: action/checkout@v4
+      - run: curl -O https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.2198+e5f5229fd.tar.xz
