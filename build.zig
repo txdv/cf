@@ -9,22 +9,20 @@ pub fn build(b: *std.Build) void {
 
     const lib = b.addStaticLibrary(.{
         .name = "cf",
-        .root_source_file = .{
-            .path = "cf.zig",
-        },
+        .root_source_file = b.path("cf.zig"),
         .target = target,
         .optimize = optimize,
     });
     b.installArtifact(lib);
 
-    const main_tests = b.addTest(.{ .root_source_file = .{ .path = "cf.zig" } });
+    const main_tests = b.addTest(.{ .root_source_file = b.path("cf.zig") });
     const run_main_tests = b.addRunArtifact(main_tests);
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_main_tests.step);
 
     const exe = b.addExecutable(.{
         .name = "cfp",
-        .root_source_file = .{ .path = "main.zig" },
+        .root_source_file = b.path("main.zig"),
         .target = target,
         .optimize = optimize,
     });
