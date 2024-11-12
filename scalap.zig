@@ -211,7 +211,7 @@ pub fn main() !void {
         try Utils.printHex(newSlice);
         const table = try readSymbolTable(newSlice, allocator);
 
-        std.debug.print("{any}\n", .{table});
+        debugSymbolTable(table);
     }
 }
 
@@ -256,13 +256,30 @@ const SymbolTable = struct {
     headers: []SymbolHeader,
 };
 
-fn debugHeaders(headers: []SymbolHeader) void {
-    for (headers, 0..) |h, i| {
-        std.debug.print("0x{x:0>4}: {d:>4}. header = {d:>4}, size = {d:>4}\n", .{
-            h.offset,
+fn maxTagNameLength(e: anytype) u32 {
+    var max_length: u32 = 0;
+    inline for (@typeInfo(@TypeOf(e)).Enum.fields(e)) |field| {
+        const length = field.name.len;
+        if (length > max_length) {
+            max_length = length;
+        }
+    }
+    return max_length;
+}
+
+fn debugSymbolTable(table: SymbolTable) void {
+    std.debug.print("version = {}.{}, size = {}\n", .{
+        table.major_version,
+        table.minor_version,
+        table.headers.len,
+    });
+
+    for (table.headers, 0..) |h, i| {
+        std.debug.print("{d:>4}. header = {s:<15}, size = {d:>4}, offset = 0x{x:0>4}\n", .{
             i,
-            @intFromEnum(h.header_type),
+            @tagName(h.header_type),
             h.size,
+            h.offset,
         });
     }
 }
