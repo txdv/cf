@@ -212,32 +212,47 @@ pub fn main() !void {
         const table = try readSymbolTable(newSlice, allocator);
 
         debugSymbolTable(table);
+
+        std.debug.print("\n", .{});
+        for (table.headers, 0..) |header, i| {
+            if (header.header_type == Header.TypeName) {
+                std.debug.print("{d:>4}. Typename = {s}\n", .{
+                    i,
+                    header.dataSlice(newSlice),
+                });
+            } else {
+                std.debug.print("{d:>4}. {s}\n", .{
+                    i,
+                    @tagName(header.header_type),
+                });
+            }
+        }
     }
 }
 
 const Header = enum(u8) {
-    TermName = 0,
-    TypeName = 1,
-    NoSymbol = 2,
-    TypeSymbol = 3,
-    AliasSymbol = 4,
-    ClassSymbol = 5,
-    ObjectSymbol = 6,
-    MethodSymbol = 7,
-    ExtRef = 8,
-    ExtModClassRef = 9,
-    NoType = 10,
-    NoPrefixType = 11,
-    ThisType = 12,
-    SingleType = 13,
-    ConstantType = 14,
-    TypeRefType = 15,
-    TypeBoundsType = 16,
-    RefinedType = 17,
-    ClassInfoType = 18,
-    MethodType = 19,
-    PolyType = 20,
-    NullaryMethodType = 21,
+    TermName = 1,
+    TypeName = 2,
+    NoSymbol = 3,
+    TypeSymbol = 4,
+    AliasSymbol = 5,
+    ClassSymbol = 6,
+    ObjectSymbol = 7,
+    MethodSymbol = 8,
+    ExtRef = 9,
+    ExtModClassRef = 10,
+    NoType = 11,
+    NoPrefixType = 12,
+    ThisType = 13,
+    SingleType = 14,
+    ConstantType = 15,
+    TypeRefType = 16,
+    TypeBoundsType = 17,
+    RefinedType = 18,
+    ClassInfoType = 19,
+    MethodType = 20,
+    PolyType = 21,
+    //NullaryMethodType = 21, // overlapping?
     MethodType2 = 22,
     AnnotatedType = 42,
     AnnotatedWithSelfType = 51,
@@ -254,8 +269,8 @@ const SymbolHeader = struct {
         return self.offset + self.header_size;
     }
 
-    fn dataSize(self: SymbolHeader) u32 {
-        return self.size - self.header_size;
+    fn dataSlice(self: SymbolHeader, data: []u8) []u8 {
+        return data[self.dataOffset() .. self.dataOffset() + self.size];
     }
 };
 
