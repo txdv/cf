@@ -206,24 +206,12 @@ pub fn main() !void {
 
         const new_len = decode7to8(scalaSig, len);
 
-        try Utils.printHex(scalaSig[0..new_len]);
+        const newSlice = scalaSig[0..new_len];
 
-        var stream2 = std.io.fixedBufferStream(scalaSig);
-        const reader2 = stream2.reader();
+        try Utils.printHex(newSlice);
+        const table = try readSymbolTable(newSlice, allocator);
 
-        const major_version = try readVarInt32(reader2);
-        const minor_version = try readVarInt32(reader2);
-
-        const symbol_count = try readVar(usize, reader2);
-
-        std.debug.print("version = {}.{} symbol_count = {}\n", .{
-            major_version,
-            minor_version,
-            symbol_count,
-        });
-
-        const headers = readHeaders(reader2, stream2, allocator, symbol_count);
-        std.debug.print("{any}\n", .{headers});
+        std.debug.print("{any}\n", .{table});
     }
 }
 
@@ -257,32 +245,57 @@ const Header = enum(u8) {
 };
 
 const SymbolHeader = struct {
-    header_type: u32,
+    header_type: Header,
     offset: u64,
     size: u32,
 };
 
-fn readHeaders(reader: anytype, stream: anytype, allocator: std.mem.Allocator, symbol_count: usize) ![]SymbolHeader {
-    var mutableStream: @TypeOf(stream) = stream;
-    const headers = try allocator.alloc(SymbolHeader, symbol_count);
+const SymbolTable = struct {
+    major_version: u32,
+    minor_version: u32,
+    headers: []SymbolHeader,
+};
+
+fn debugHeaders(headers: []SymbolHeader) void {
+    for (headers, 0..) |h, i| {
+        std.debug.print("0x{x:0>4}: {d:>4}. header = {d:>4}, size = {d:>4}\n", .{
+            h.offset,
+            i,
+            @intFromEnum(h.header_type),
+            h.size,
+        });
+    }
+}
+
+fn readSymbolTable(data: []u8, allocator: std.mem.Allocator) !SymbolTable {
+    var symbol_table: SymbolTable = undefined;
+
+    var stream = std.io.fixedBufferStream(data);
+    const reader = stream.reader();
+
+    symbol_table.major_version = try readVar(u32, reader);
+    symbol_table.minor_version = try readVar(u32, reader);
+
+    const symbol_count = try readVar(usize, reader);
+
+    symbol_table.headers = try allocator.alloc(SymbolHeader, symbol_count);
 
     var i: usize = 0;
     while (i < symbol_count) {
-        const pos = try mutableStream.getPos();
-        headers[i] = try readHeader(pos, reader);
+        const pos = try stream.getPos();
+        symbol_table.headers[i] = try readHeader(pos, reader);
         i += 1;
     }
 
-    return headers;
+    return symbol_table;
 }
 
 fn readHeader(offset: u64, reader: anytype) !SymbolHeader {
     var header: SymbolHeader = undefined;
-    header.header_type = @as(u8, try reader.readByte());
+    header.header_type = @enumFromInt(try reader.readByte());
     header.size = try readVar(u32, reader);
     header.offset = offset;
 
     try reader.skipBytes(@intCast(header.size), .{});
-
     return header;
 }
