@@ -248,6 +248,15 @@ const SymbolHeader = struct {
     header_type: Header,
     offset: u64,
     size: u32,
+    header_size: u8,
+
+    fn dataOffset(self: SymbolHeader) u64 {
+        return self.offset + self.header_size;
+    }
+
+    fn dataSize(self: SymbolHeader) u32 {
+        return self.size - self.header_size;
+    }
 };
 
 const SymbolTable = struct {
@@ -275,11 +284,12 @@ fn debugSymbolTable(table: SymbolTable) void {
     });
 
     for (table.headers, 0..) |h, i| {
-        std.debug.print("{d:>4}. header = {s:<15}, size = {d:>4}, offset = 0x{x:0>4}\n", .{
+        std.debug.print("{d:>4}. header = {s:<15}, size = {d:>4}, offset = 0x{x:0>4}, data_offset = 0x{x:0>4}\n", .{
             i,
             @tagName(h.header_type),
             h.size,
             h.offset,
+            h.dataOffset(),
         });
     }
 }
@@ -299,20 +309,16 @@ fn readSymbolTable(data: []u8, allocator: std.mem.Allocator) !SymbolTable {
 
     var i: usize = 0;
     while (i < symbol_count) {
-        const pos = try stream.getPos();
-        symbol_table.headers[i] = try readHeader(pos, reader);
+        const offset = try stream.getPos();
+
+        symbol_table.headers[i].header_type = @enumFromInt(try reader.readByte());
+        symbol_table.headers[i].size = try readVar(u32, reader);
+        symbol_table.headers[i].offset = offset;
+        symbol_table.headers[i].header_size = @truncate(try stream.getPos() - offset);
+
+        try reader.skipBytes(@intCast(symbol_table.headers[i].size), .{});
         i += 1;
     }
 
     return symbol_table;
-}
-
-fn readHeader(offset: u64, reader: anytype) !SymbolHeader {
-    var header: SymbolHeader = undefined;
-    header.header_type = @enumFromInt(try reader.readByte());
-    header.size = try readVar(u32, reader);
-    header.offset = offset;
-
-    try reader.skipBytes(@intCast(header.size), .{});
-    return header;
 }
