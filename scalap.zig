@@ -214,7 +214,7 @@ pub fn main() !void {
         const major_version = try readVarInt32(reader2);
         const minor_version = try readVarInt32(reader2);
 
-        const symbol_count = try readVarInt32(reader2);
+        const symbol_count = try readVar(usize, reader2);
 
         std.debug.print("version = {}.{} symbol_count = {}\n", .{
             major_version,
@@ -222,29 +222,67 @@ pub fn main() !void {
             symbol_count,
         });
 
-        var i: usize = 0;
-        while (i < symbol_count) {
-            std.debug.print("{X:0>4} ", .{
-                try stream2.getPos(),
-            });
-            try readHeader(i, reader2);
-            i += 1;
-        }
+        const headers = readHeaders(reader2, stream2, allocator, symbol_count);
+        std.debug.print("{any}\n", .{headers});
     }
 }
 
-fn readHeader(n: usize, reader: anytype) !void {
-    var header: u32 = 0;
-    var size: u32 = 0;
+const Header = enum(u8) {
+    TermName = 0,
+    TypeName = 1,
+    NoSymbol = 2,
+    TypeSymbol = 3,
+    AliasSymbol = 4,
+    ClassSymbol = 5,
+    ObjectSymbol = 6,
+    MethodSymbol = 7,
+    ExtRef = 8,
+    ExtModClassRef = 9,
+    NoType = 10,
+    NoPrefixType = 11,
+    ThisType = 12,
+    SingleType = 13,
+    ConstantType = 14,
+    TypeRefType = 15,
+    TypeBoundsType = 16,
+    RefinedType = 17,
+    ClassInfoType = 18,
+    MethodType = 19,
+    PolyType = 20,
+    NullaryMethodType = 21,
+    MethodType2 = 22,
+    AnnotatedType = 42,
+    AnnotatedWithSelfType = 51,
+    ExistentialType = 48,
+};
 
-    header = try readVar(u32, reader);
-    size = try readVar(u32, reader);
+const SymbolHeader = struct {
+    header_type: u32,
+    offset: u64,
+    size: u32,
+};
 
-    std.debug.print("{d:>4}. header = {d:>4}, size = {d:>4}\n", .{
-        n,
-        header,
-        size,
-    });
+fn readHeaders(reader: anytype, stream: anytype, allocator: std.mem.Allocator, symbol_count: usize) ![]SymbolHeader {
+    var mutableStream: @TypeOf(stream) = stream;
+    const headers = try allocator.alloc(SymbolHeader, symbol_count);
 
-    try reader.skipBytes(@intCast(size), .{});
+    var i: usize = 0;
+    while (i < symbol_count) {
+        const pos = try mutableStream.getPos();
+        headers[i] = try readHeader(pos, reader);
+        i += 1;
+    }
+
+    return headers;
+}
+
+fn readHeader(offset: u64, reader: anytype) !SymbolHeader {
+    var header: SymbolHeader = undefined;
+    header.header_type = @as(u8, try reader.readByte());
+    header.size = try readVar(u32, reader);
+    header.offset = offset;
+
+    try reader.skipBytes(@intCast(header.size), .{});
+
+    return header;
 }
