@@ -293,8 +293,20 @@ const ThisType = struct {
 };
 
 const ExtModClassRef = struct {
+    name: u32,
+    symbol: ?u32
 
-    // fn read(data: []u8) !ThisType {}
+    fn read(data: []u8) !ExtModClassRef {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+
+        return ExtModClassRef {
+            .name = try readVar(u32, reader),
+            .symbol = readVar(u32, reader) catch null
+        };
+
+    }
 
 };
 
