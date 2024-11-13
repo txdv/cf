@@ -214,10 +214,12 @@ pub fn main() !void {
 
         std.debug.print("\n", .{});
         for (table.headers, 0..) |header, i| {
+            const header_data = header.dataSlice(newSlice);
+
             if (header.header_type == Header.TypeName) {
                 std.debug.print("{d:>4}. TypeName = {s}\n", .{
                     i,
-                    header.dataSlice(newSlice),
+                    header_data,
                 });
             } else if (header.header_type == Header.TermName) {
                 std.debug.print("{d:>4}. TermName = {s}\n", .{
@@ -225,33 +227,21 @@ pub fn main() !void {
                     header.dataSlice(newSlice),
                 });
             } else if (header.header_type == Header.ObjectSymbol or header.header_type == Header.ClassSymbol or header.header_type == Header.MethodSymbol) {
-                const data = header.dataSlice(newSlice);
-
-                // std.debug.print("{d:>4}. {s} {any}\n", .{
-                //     i,
-                //     @tagName(header.header_type),
-                //     readSymbolInfo(data),
-                // });
-                const symbol_info = try SymbolInfo.read(data);
+                const symbol_info = try SymbolInfo.read(header_data);
                 std.debug.print("{d:>4}. ", .{i});
                 symbol_info.debug(&table, newSlice);
             } else if (header.header_type == Header.TypeRefType) {
-                //const typeRef = try readVar(u32, reader);
-                //const symbolRef = try readVar(u32, reader);
-
-                //std.debug.print("TypeRefType {} {}\n", .{ typeRef, symbolRef });
-                const type_ref_type = try TypeRefType.read(header.dataSlice(newSlice));
+                const type_ref_type = try TypeRefType.read(header_data);
                 std.debug.print("{d:>4}. ", .{i});
                 type_ref_type.debug(table);
-
-                // std.debug.print("{d:>4}. {s} typeRefType = {}\n", .{
-                //     i,
-                //     @tagName(header.header_type),
-                //     typeRefType,
-                // });
             } else if (header.header_type == Header.ThisType) {
                 const this_type = try ThisType.read(header.dataSlice(newSlice));
+                std.debug.print("{d:>4}. ", .{i});
                 this_type.debug(&table);
+            } else if (header.header_type == Header.ExtModClassRef) {
+                std.debug.print("{d:>4}. ", .{i});
+                const extModClassRef = try ExtModClassRef.read(header_data);
+                extModClassRef.debug();
             } else {
                 std.debug.print("{d:>4}. -{s}\n", .{
                     i,
@@ -294,20 +284,24 @@ const ThisType = struct {
 
 const ExtModClassRef = struct {
     name: u32,
-    symbol: ?u32
+    symbol: ?u32,
 
     fn read(data: []u8) !ExtModClassRef {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader();
 
-
-        return ExtModClassRef {
+        return ExtModClassRef{
             .name = try readVar(u32, reader),
-            .symbol = readVar(u32, reader) catch null
+            .symbol = readVar(u32, reader) catch null,
         };
-
     }
 
+    pub fn debug(self: ExtModClassRef) void {
+        std.debug.print("ExtModClassRef {{ .name = {}, .symbol = {any} }}\n", .{
+            self.name,
+            self.symbol,
+        });
+    }
 };
 
 const TypeRefType = struct {
