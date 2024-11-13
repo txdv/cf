@@ -208,9 +208,9 @@ pub fn main() !void {
         const newSlice = scalaSig[0..new_len];
 
         try Utils.printHex(newSlice);
-        const table = try readSymbolTable(newSlice, allocator);
+        const table = try SymbolTable.read(newSlice, allocator);
 
-        debugSymbolTable(table);
+        table.debug();
 
         std.debug.print("\n", .{});
         for (table.headers, 0..) |header, i| {
@@ -232,7 +232,7 @@ pub fn main() !void {
                 //     @tagName(header.header_type),
                 //     readSymbolInfo(data),
                 // });
-                const symbol_info = try readSymbolInfo(data);
+                const symbol_info = try SymbolInfo.read(data);
                 std.debug.print("{d:>4}. ", .{i});
                 symbol_info.debug(&table, newSlice);
             } else if (header.header_type == Header.TypeRefType) {
@@ -240,7 +240,7 @@ pub fn main() !void {
                 //const symbolRef = try readVar(u32, reader);
 
                 //std.debug.print("TypeRefType {} {}\n", .{ typeRef, symbolRef });
-                const type_ref_type = try readTypeRefInfo(header.dataSlice(newSlice));
+                const type_ref_type = try TypeRefType.read(header.dataSlice(newSlice));
                 std.debug.print("{d:>4}. ", .{i});
                 type_ref_type.debug(table);
 
@@ -294,16 +294,25 @@ const ThisType = struct {
 
 const ExtModClassRef = struct {
 
-    fn read(data: []u8) !ThisType {
+    // fn read(data: []u8) !ThisType {}
 
-    }
-
-}
+};
 
 const TypeRefType = struct {
     type_ref: u32,
     symbol_ref: u32,
     type_args: []u8,
+
+    fn read(data: []u8) !TypeRefType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return TypeRefType{
+            .type_ref = try readVar(u32, reader),
+            .symbol_ref = try readVar(u32, reader),
+            .type_args = data[try stream.getPos()..],
+        };
+    }
 
     fn debug(self: TypeRefType, table: SymbolTable) void {
         _ = table;
@@ -316,23 +325,37 @@ const TypeRefType = struct {
     }
 };
 
-fn readTypeRefInfo(data: []u8) !TypeRefType {
-    var stream = std.io.fixedBufferStream(data);
-    const reader = stream.reader();
-
-    return TypeRefType{
-        .type_ref = try readVar(u32, reader),
-        .symbol_ref = try readVar(u32, reader),
-        .type_args = data[try stream.getPos()..],
-    };
-}
-
 const SymbolInfo = struct {
     name: u32,
     symbol: u32,
     flags: u32,
     private_within: ?u32,
     info: u32,
+
+    fn read(data: []u8) !SymbolInfo {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+        const name = try readVar(u32, reader);
+        const symbol = try readVar(u32, reader);
+        const flags = try readVar(u32, reader);
+        const private_within = try readVar(u32, reader);
+        const info = readVar(u32, reader) catch {
+            return SymbolInfo{
+                .name = name,
+                .symbol = symbol,
+                .flags = flags,
+                .private_within = null,
+                .info = private_within,
+            };
+        };
+        return SymbolInfo{
+            .name = name,
+            .symbol = symbol,
+            .flags = flags,
+            .private_within = private_within,
+            .info = info,
+        };
+    }
 
     pub fn debug(self: SymbolInfo, table: *const SymbolTable, data: []u8) void {
         const name = table.*.headers[self.name].dataSlice(data);
@@ -343,31 +366,6 @@ const SymbolInfo = struct {
         });
     }
 };
-
-fn readSymbolInfo(data: []u8) !SymbolInfo {
-    var stream = std.io.fixedBufferStream(data);
-    const reader = stream.reader();
-    const name = try readVar(u32, reader);
-    const symbol = try readVar(u32, reader);
-    const flags = try readVar(u32, reader);
-    const private_within = try readVar(u32, reader);
-    const info = readVar(u32, reader) catch {
-        return SymbolInfo{
-            .name = name,
-            .symbol = symbol,
-            .flags = flags,
-            .private_within = null,
-            .info = private_within,
-        };
-    };
-    return SymbolInfo{
-        .name = name,
-        .symbol = symbol,
-        .flags = flags,
-        .private_within = private_within,
-        .info = info,
-    };
-}
 
 const Header = enum(u8) {
     TermName = 1,
@@ -417,6 +415,56 @@ const SymbolTable = struct {
     major_version: u32,
     minor_version: u32,
     headers: []SymbolHeader,
+    data: []u8,
+
+    fn read(data: []u8, allocator: std.mem.Allocator) !SymbolTable {
+        var symbol_table: SymbolTable = undefined;
+
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        symbol_table.major_version = try readVar(u32, reader);
+        symbol_table.minor_version = try readVar(u32, reader);
+
+        const symbol_count = try readVar(usize, reader);
+
+        symbol_table.headers = try allocator.alloc(SymbolHeader, symbol_count);
+
+        var i: usize = 0;
+        while (i < symbol_count) {
+            const offset = try stream.getPos();
+
+            symbol_table.headers[i].header_type = @enumFromInt(try reader.readByte());
+            symbol_table.headers[i].size = try readVar(u32, reader);
+            symbol_table.headers[i].offset = offset;
+            symbol_table.headers[i].header_size = @truncate(try stream.getPos() - offset);
+
+            try reader.skipBytes(@intCast(symbol_table.headers[i].size), .{});
+            i += 1;
+        }
+
+        symbol_table.data = data;
+
+        return symbol_table;
+    }
+
+    fn debug(table: SymbolTable) void {
+        std.debug.print("version = {}.{}, size = {}\n", .{
+            table.major_version,
+            table.minor_version,
+            table.headers.len,
+        });
+
+        for (table.headers, 0..) |h, i| {
+            std.debug.print("{d:>4}. header = {s:<15}, size = {d:>4}, offset = 0x{x:0>4}, data_offset = 0x{x:0>4}\n", .{
+                i,
+                @tagName(h.header_type),
+                h.size,
+                h.offset,
+                h.dataOffset(),
+            });
+        }
+    }
 };
 
 fn maxTagNameLength(e: anytype) u32 {
@@ -428,51 +476,4 @@ fn maxTagNameLength(e: anytype) u32 {
         }
     }
     return max_length;
-}
-
-fn debugSymbolTable(table: SymbolTable) void {
-    std.debug.print("version = {}.{}, size = {}\n", .{
-        table.major_version,
-        table.minor_version,
-        table.headers.len,
-    });
-
-    for (table.headers, 0..) |h, i| {
-        std.debug.print("{d:>4}. header = {s:<15}, size = {d:>4}, offset = 0x{x:0>4}, data_offset = 0x{x:0>4}\n", .{
-            i,
-            @tagName(h.header_type),
-            h.size,
-            h.offset,
-            h.dataOffset(),
-        });
-    }
-}
-
-fn readSymbolTable(data: []u8, allocator: std.mem.Allocator) !SymbolTable {
-    var symbol_table: SymbolTable = undefined;
-
-    var stream = std.io.fixedBufferStream(data);
-    const reader = stream.reader();
-
-    symbol_table.major_version = try readVar(u32, reader);
-    symbol_table.minor_version = try readVar(u32, reader);
-
-    const symbol_count = try readVar(usize, reader);
-
-    symbol_table.headers = try allocator.alloc(SymbolHeader, symbol_count);
-
-    var i: usize = 0;
-    while (i < symbol_count) {
-        const offset = try stream.getPos();
-
-        symbol_table.headers[i].header_type = @enumFromInt(try reader.readByte());
-        symbol_table.headers[i].size = try readVar(u32, reader);
-        symbol_table.headers[i].offset = offset;
-        symbol_table.headers[i].header_size = @truncate(try stream.getPos() - offset);
-
-        try reader.skipBytes(@intCast(symbol_table.headers[i].size), .{});
-        i += 1;
-    }
-
-    return symbol_table;
 }
