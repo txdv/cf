@@ -216,40 +216,52 @@ pub fn main() !void {
         for (table.headers, 0..) |header, i| {
             const header_data = header.dataSlice(newSlice);
 
+            std.debug.print("{d:>4}. ", .{i});
             if (header.header_type == Header.TypeName) {
-                std.debug.print("{d:>4}. TypeName = {s}\n", .{
-                    i,
+                std.debug.print("TypeName = {s}\n", .{
                     header_data,
                 });
             } else if (header.header_type == Header.TermName) {
-                std.debug.print("{d:>4}. TermName = {s}\n", .{
-                    i,
+                std.debug.print("TermName = {s}\n", .{
                     header.dataSlice(newSlice),
                 });
             } else if (header.header_type == Header.ObjectSymbol or header.header_type == Header.ClassSymbol or header.header_type == Header.MethodSymbol) {
                 const symbol_info = try SymbolInfo.read(header_data);
-                std.debug.print("{d:>4}. ", .{i});
-                symbol_info.debug(&table, newSlice);
+                debug(symbol_info, &table);
             } else if (header.header_type == Header.TypeRefType) {
                 const type_ref_type = try TypeRefType.read(header_data);
-                std.debug.print("{d:>4}. ", .{i});
-                type_ref_type.debug(table);
+                debug(type_ref_type, &table);
             } else if (header.header_type == Header.ThisType) {
                 const this_type = try ThisType.read(header.dataSlice(newSlice));
-                std.debug.print("{d:>4}. ", .{i});
-                this_type.debug(&table);
+                debug(this_type, &table);
             } else if (header.header_type == Header.ExtModClassRef) {
-                std.debug.print("{d:>4}. ", .{i});
-                const extModClassRef = try ExtModClassRef.read(header_data);
-                extModClassRef.debug();
+                const ext_mod_class_ref = try ExtModClassRef.read(header_data);
+                debug(ext_mod_class_ref, &table);
+            } else if (header.header_type == Header.ExtRef) {
+                const ext_ref = try ExtRef.read(header_data);
+                debug(ext_ref, &table);
+            } else if (header.header_type == Header.ClassInfoType) {
+                const class_info_type = try ClassInfoType.read(header_data);
+                debug(class_info_type, &table);
+            } else if (header.header_type == Header.MethodType) {
+                const method_type = try MethodType.read(header_data);
+                debug(method_type, &table);
             } else {
-                std.debug.print("{d:>4}. -{s}\n", .{
-                    i,
+                std.debug.print("-{s}\n", .{
                     @tagName(header.header_type),
                 });
             }
         }
     }
+}
+
+fn debug(debuggable: anytype, table: *const SymbolTable) void {
+    debuggable.debug(table);
+}
+
+fn generic_debug(obj: anytype, table: *const SymbolTable) void {
+    _ = table;
+    std.debug.print("{}\n", .{obj});
 }
 
 // symbol:
@@ -261,7 +273,44 @@ pub fn main() !void {
 // - MethodSymbol
 // - ExtRef
 // - ExtModClassRef
-//
+
+const MethodType = struct {
+    result_type: u32,
+    param_symbols: []u8,
+
+    fn read(data: []u8) !MethodType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return MethodType{
+            .result_type = try readVar(u32, reader),
+            .param_symbols = data[try stream.getPos()..],
+        };
+    }
+
+    fn debug(self: MethodType, table: *const SymbolTable) void {
+        generic_debug(self, table);
+    }
+};
+
+const ClassInfoType = struct {
+    symbol: u32,
+    type_refs: []u8,
+
+    fn read(data: []u8) !ClassInfoType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return ClassInfoType{
+            .symbol = try readVar(u32, reader),
+            .type_refs = data[try stream.getPos()..],
+        };
+    }
+
+    fn debug(self: ClassInfoType, table: *const SymbolTable) void {
+        generic_debug(self, table);
+    }
+};
 
 const ThisType = struct {
     symbol: u32,
@@ -275,9 +324,32 @@ const ThisType = struct {
     }
 
     fn debug(self: ThisType, table: *const SymbolTable) void {
-        const name = table.headers[self.symbol];
+        _ = table;
+        //const name = table.headers[self.symbol];
         std.debug.print("ThisType {{ .symbol = {} }}\n", .{
-            name,
+            self.symbol,
+        });
+    }
+};
+
+const ExtRef = struct {
+    name: u32,
+    symbol: ?u32,
+
+    fn read(data: []u8) !ExtRef {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return ExtRef{
+            .name = try readVar(u32, reader),
+            .symbol = readVar(u32, reader) catch null,
+        };
+    }
+
+    pub fn debug(self: ExtRef, table: *const SymbolTable) void {
+        std.debug.print("ExtRef {{ .name = {s}, .symbol = {any} }}\n", .{
+            table.getName(self.name),
+            self.symbol,
         });
     }
 };
@@ -296,9 +368,9 @@ const ExtModClassRef = struct {
         };
     }
 
-    pub fn debug(self: ExtModClassRef) void {
-        std.debug.print("ExtModClassRef {{ .name = {}, .symbol = {any} }}\n", .{
-            self.name,
+    pub fn debug(self: ExtModClassRef, table: *const SymbolTable) void {
+        std.debug.print("ExtModClassRef {{ .name = {s}, .symbol = {any} }}\n", .{
+            table.getName(self.name),
             self.symbol,
         });
     }
@@ -320,10 +392,10 @@ const TypeRefType = struct {
         };
     }
 
-    fn debug(self: TypeRefType, table: SymbolTable) void {
+    fn debug(self: TypeRefType, table: *const SymbolTable) void {
         _ = table;
 
-        std.debug.print("type_ref = {}, symbol_ref = {}, args = {}\n", .{
+        std.debug.print("TypeRefType {{ .type_ref = {}, .symbol_ref = {}, .args = {} }}\n", .{
             self.type_ref,
             self.symbol_ref,
             self.type_args.len,
@@ -363,9 +435,9 @@ const SymbolInfo = struct {
         };
     }
 
-    pub fn debug(self: SymbolInfo, table: *const SymbolTable, data: []u8) void {
-        const name = table.*.headers[self.name].dataSlice(data);
-        std.debug.print("SymbolInfo(name = {s}, flags = {}, info = {})\n", .{
+    pub fn debug(self: SymbolInfo, table: *const SymbolTable) void {
+        const name = table.*.headers[self.name].dataSlice(table.*.data);
+        std.debug.print("SymbolInfo {{ .name = {s}, .flags = {}, .info = {} }}\n", .{
             name,
             self.flags,
             self.info,
@@ -422,6 +494,10 @@ const SymbolTable = struct {
     minor_version: u32,
     headers: []SymbolHeader,
     data: []u8,
+
+    fn getName(self: SymbolTable, name: u32) []u8 {
+        return self.headers[name].dataSlice(self.data);
+    }
 
     fn read(data: []u8, allocator: std.mem.Allocator) !SymbolTable {
         var symbol_table: SymbolTable = undefined;
