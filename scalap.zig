@@ -208,30 +208,12 @@ pub fn main() !void {
         const newSlice = scalaSig[0..new_len];
 
         try Utils.printHex(newSlice);
-        const table = try SymbolTable.read(newSlice, allocator);
+        const table: SymbolTable = try SymbolTable.read(newSlice, allocator);
 
         table.debug();
 
-        std.debug.print("\n", .{});
-        for (table.headers, 0..) |header, i| {
-            const header_data = header.dataSlice(newSlice);
-
-            std.debug.print("{d:>4}. ", .{i});
-
-            const h = try SymbolHeader.read(header, &table, header_data);
-
-            h.debug(&table);
-        }
+        //debug(&table);
     }
-}
-
-fn debug(debuggable: anytype, table: *const SymbolTable) void {
-    debuggable.debug(table);
-}
-
-fn generic_debug(obj: anytype, table: *const SymbolTable) void {
-    _ = table;
-    std.debug.print("{}\n", .{obj});
 }
 
 // symbol:
@@ -498,8 +480,6 @@ const SingleType = struct {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader();
 
-        std.debug.print("data = {any}\n", .{data});
-
         return SingleType{
             .type_ref = try readVar(u32, reader),
             .symbol_ref = try readVar(u32, reader),
@@ -640,6 +620,14 @@ const SymbolTable = struct {
 
         symbol_table.data = data;
 
+        symbol_table.h = try allocator.alloc(Header, symbol_count);
+
+        for (symbol_table.headers, 0..) |header, j| {
+            const header_data = header.dataSlice(symbol_table.data);
+
+            symbol_table.h[j] = try SymbolHeader.read(header, &symbol_table, header_data);
+        }
+
         return symbol_table;
     }
 
@@ -659,6 +647,15 @@ const SymbolTable = struct {
                 h.dataOffset(),
             });
         }
+
+        std.debug.print("\n", .{});
+
+        for (table.h, 0..) |h, i| {
+            std.debug.print("{d:>4}. ", .{i});
+            h.debug(&table);
+        }
+
+        std.debug.print("\n", .{});
     }
 };
 
