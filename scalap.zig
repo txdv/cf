@@ -212,6 +212,8 @@ pub fn main() !void {
 
         table.debug();
 
+        try table.print();
+
         //debug(&table);
     }
 }
@@ -656,6 +658,97 @@ const SymbolTable = struct {
         }
 
         std.debug.print("\n", .{});
+    }
+
+    fn lookupTermName(table: SymbolTable, index: u32) []u8 {
+        return table.h[index].term_name.name;
+    }
+
+    fn lookupTypeName(table: SymbolTable, index: u32) []u8 {
+        return table.h[index].type_name.name;
+    }
+
+    fn print(table: SymbolTable) !void {
+        //table.debug();
+        const stdout = std.io.getStdOut();
+        const writer = stdout.writer();
+
+        switch (table.h[0]) {
+            .object_symbol => |object_symbol| {
+                try writer.print("object {s}", .{
+                    table.lookupTermName(object_symbol.symbol.name),
+                });
+                const class = table.findClass(object_symbol.symbol.name).?;
+                const class_info = table.h[class.symbol.info].class_info_type;
+
+                for (class_info.type_refs, 0..) |type_ref, i| {
+                    if (i == 0) {
+                        try writer.print(" extends ", .{});
+                    } else if (i == 1) {
+                        try writer.print(" with ", .{});
+                    }
+                    try table.printType(writer, table.h[type_ref]);
+                }
+                try writer.print(" {{\n", .{});
+
+                for (table.h, 0..) |h, i| {
+                    switch (h) {
+                        .method_symbol => |method_symbol| {
+                            const name = table.lookupTermName(method_symbol.symbol.name);
+                            std.debug.print("{}. = {s}\n", .{ i, name });
+                        },
+                        else => {},
+                    }
+                }
+
+                try writer.print("}}\n", .{});
+            },
+            else => {},
+        }
+        //std.debug.print("MENSCH! \n", .{table});
+    }
+
+    fn printType(table: SymbolTable, writer: anytype, h: Header) !void {
+        switch (h) {
+            .type_ref_type => |type_ref_type| {
+                try table.printType(writer, table.h[type_ref_type.type_ref]);
+                try writer.print(".", .{});
+                try table.printType(writer, table.h[type_ref_type.symbol_ref]);
+            },
+            .this_type => |this_type| {
+                try table.printType(writer, table.h[this_type.symbol]);
+            },
+            .ext_mod_class_ref => |ext_mod_class_ref| {
+                try writer.print("{s}", .{table.h[ext_mod_class_ref.name].term_name.name});
+            },
+            .ext_ref => |ext_ref| {
+                try table.printType(writer, table.h[ext_ref.name]);
+            },
+            .type_name => |type_name| {
+                try writer.print("{s}", .{type_name.name});
+            },
+            else => {
+                std.debug.print("h => {}\n", .{h});
+                unreachable;
+            },
+        }
+    }
+
+    fn findClass(table: SymbolTable, name: u32) ?ClassSymbol {
+        const n = table.lookupTermName(name);
+        for (table.h) |header| {
+            switch (header) {
+                .class_symbol => |class_symbol| {
+                    const class_name = table.lookupTypeName(class_symbol.symbol.name);
+                    if (std.mem.eql(u8, n, class_name)) {
+                        //std.debug.print("{s}\n", .{class_name});
+                        return class_symbol;
+                    }
+                },
+                else => {},
+            }
+        }
+        return null;
     }
 };
 
