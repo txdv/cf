@@ -257,10 +257,6 @@ const MethodType = struct {
             .param_symbols = data[try stream.getPos()..],
         };
     }
-
-    fn debug(self: MethodType, table: *const SymbolTable) void {
-        generic_debug(self, table);
-    }
 };
 
 const ClassInfoType = struct {
@@ -276,10 +272,6 @@ const ClassInfoType = struct {
             .type_refs = data[try stream.getPos()..],
         };
     }
-
-    fn debug(self: ClassInfoType, table: *const SymbolTable) void {
-        generic_debug(self, table);
-    }
 };
 
 const ThisType = struct {
@@ -291,14 +283,6 @@ const ThisType = struct {
         return ThisType{
             .symbol = try readVar(u32, reader),
         };
-    }
-
-    fn debug(self: ThisType, table: *const SymbolTable) void {
-        _ = table;
-        //const name = table.headers[self.symbol];
-        std.debug.print("ThisType {{ .symbol = {} }}\n", .{
-            self.symbol,
-        });
     }
 };
 
@@ -315,13 +299,6 @@ const ExtRef = struct {
             .symbol = readVar(u32, reader) catch null,
         };
     }
-
-    pub fn debug(self: ExtRef, table: *const SymbolTable) void {
-        std.debug.print("ExtRef {{ .name = {s}, .symbol = {any} }}\n", .{
-            table.getName(self.name),
-            self.symbol,
-        });
-    }
 };
 
 const ExtModClassRef = struct {
@@ -336,13 +313,6 @@ const ExtModClassRef = struct {
             .name = try readVar(u32, reader),
             .symbol = readVar(u32, reader) catch null,
         };
-    }
-
-    pub fn debug(self: ExtModClassRef, table: *const SymbolTable) void {
-        std.debug.print("ExtModClassRef {{ .name = {s}, .symbol = {any} }}\n", .{
-            table.getName(self.name),
-            self.symbol,
-        });
     }
 };
 
@@ -360,16 +330,6 @@ const TypeRefType = struct {
             .symbol_ref = try readVar(u32, reader),
             .type_args = data[try stream.getPos()..],
         };
-    }
-
-    fn debug(self: TypeRefType, table: *const SymbolTable) void {
-        _ = table;
-
-        std.debug.print("TypeRefType {{ .type_ref = {}, .symbol_ref = {}, .args = {} }}\n", .{
-            self.type_ref,
-            self.symbol_ref,
-            self.type_args.len,
-        });
     }
 };
 
@@ -408,15 +368,6 @@ const SymbolInfo = struct {
             .private_within = private_within,
             .info = info,
         };
-    }
-
-    pub fn debug(self: SymbolInfo, table: *const SymbolTable) void {
-        const name = table.*.headers[self.name].dataSlice(table.*.data);
-        std.debug.print("SymbolInfo {{ .name = {s}, .flags = {}, .info = {} }}\n", .{
-            name,
-            self.flags,
-            self.info,
-        });
     }
 };
 
@@ -481,10 +432,9 @@ const Header = union(HeaderType) {
         _ = table;
         switch (header) {
             .term_name => |name| std.debug.print("TermName = \"{s}\"\n", .{name.name}),
-            .type_name => |name| std.debug.print("Typenamee = \"{s}\"\n", .{name.name}),
+            .type_name => |name| std.debug.print("TypeName = \"{s}\"\n", .{name.name}),
             else => |item| std.debug.print("{}\n", .{item}),
         }
-        //std.debug.print("{}\n", .{header});
     }
 };
 
@@ -655,6 +605,7 @@ const SymbolTable = struct {
     major_version: u32,
     minor_version: u32,
     headers: []SymbolHeader,
+    h: []Header,
     data: []u8,
 
     fn getName(self: SymbolTable, name: u32) []u8 {
