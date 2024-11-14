@@ -217,40 +217,10 @@ pub fn main() !void {
             const header_data = header.dataSlice(newSlice);
 
             std.debug.print("{d:>4}. ", .{i});
-            if (header.header_type == Header.TypeName) {
-                std.debug.print("TypeName = {s}\n", .{
-                    header_data,
-                });
-            } else if (header.header_type == Header.TermName) {
-                std.debug.print("TermName = {s}\n", .{
-                    header.dataSlice(newSlice),
-                });
-            } else if (header.header_type == Header.ObjectSymbol or header.header_type == Header.ClassSymbol or header.header_type == Header.MethodSymbol) {
-                const symbol_info = try SymbolInfo.read(header_data);
-                debug(symbol_info, &table);
-            } else if (header.header_type == Header.TypeRefType) {
-                const type_ref_type = try TypeRefType.read(header_data);
-                debug(type_ref_type, &table);
-            } else if (header.header_type == Header.ThisType) {
-                const this_type = try ThisType.read(header.dataSlice(newSlice));
-                debug(this_type, &table);
-            } else if (header.header_type == Header.ExtModClassRef) {
-                const ext_mod_class_ref = try ExtModClassRef.read(header_data);
-                debug(ext_mod_class_ref, &table);
-            } else if (header.header_type == Header.ExtRef) {
-                const ext_ref = try ExtRef.read(header_data);
-                debug(ext_ref, &table);
-            } else if (header.header_type == Header.ClassInfoType) {
-                const class_info_type = try ClassInfoType.read(header_data);
-                debug(class_info_type, &table);
-            } else if (header.header_type == Header.MethodType) {
-                const method_type = try MethodType.read(header_data);
-                debug(method_type, &table);
-            } else {
-                std.debug.print("-{s}\n", .{
-                    @tagName(header.header_type),
-                });
-            }
+
+            const h = try SymbolHeader.read(header, &table, header_data);
+
+            h.debug(&table);
         }
     }
 }
@@ -413,6 +383,11 @@ const SymbolInfo = struct {
     fn read(data: []u8) !SymbolInfo {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader();
+
+        return try read2(reader);
+    }
+
+    fn read2(reader: anytype) !SymbolInfo {
         const name = try readVar(u32, reader);
         const symbol = try readVar(u32, reader);
         const flags = try readVar(u32, reader);
@@ -445,37 +420,159 @@ const SymbolInfo = struct {
     }
 };
 
-const Header = enum(u8) {
-    TermName = 1,
-    TypeName = 2,
-    NoSymbol = 3,
-    TypeSymbol = 4,
-    AliasSymbol = 5,
-    ClassSymbol = 6,
-    ObjectSymbol = 7,
-    MethodSymbol = 8,
-    ExtRef = 9,
-    ExtModClassRef = 10,
-    NoType = 11,
-    NoPrefixType = 12,
-    ThisType = 13,
-    SingleType = 14,
-    ConstantType = 15,
-    TypeRefType = 16,
-    TypeBoundsType = 17,
-    RefinedType = 18,
-    ClassInfoType = 19,
-    MethodType = 20,
-    PolyType = 21,
+const HeaderType = enum(u8) {
+    term_name = 1,
+    type_name = 2,
+    no_symbol = 3,
+    type_symbol = 4,
+    alias_symbol = 5,
+    class_symbol = 6,
+    object_symbol = 7,
+    method_symbol = 8,
+    ext_ref = 9,
+    ext_mod_class_ref = 10,
+    no_type = 11,
+    no_prefix_type = 12,
+    this_type = 13,
+    single_type = 14,
+    constant_type = 15,
+    type_ref_type = 16,
+    type_bounds_type = 17,
+    refined_type = 18,
+    class_info_type = 19,
+    method_type = 20,
+    poly_type = 21,
     //NullaryMethodType = 21, // overlapping?
-    MethodType2 = 22,
-    AnnotatedType = 42,
-    AnnotatedWithSelfType = 51,
-    ExistentialType = 48,
+    //method_type2 = 22,
+    annotated_type = 42,
+    annotated_with_self_type = 51,
+    existential_type = 48,
 };
 
+const Header = union(HeaderType) {
+    term_name: TermName,
+    type_name: TypeName,
+    no_symbol: NoSymbol,
+    type_symbol: TypeSymbol,
+    alias_symbol: AliasSymbol,
+    class_symbol: ClassSymbol,
+    object_symbol: ObjectSymbol,
+    method_symbol: MethodSymbol,
+    ext_ref: ExtRef,
+    ext_mod_class_ref: ExtModClassRef,
+    no_type: NoType,
+    no_prefix_type: NoPrefixType,
+    this_type: ThisType,
+    single_type: SingleType,
+    constant_type: ConstantType,
+    type_ref_type: TypeRefType,
+    type_bounds_type: TypeBoundsType,
+    refined_type: RefinedType,
+    class_info_type: ClassInfoType,
+    method_type: MethodType,
+    poly_type: PolyType,
+    //NullaryMethodType = 21, // overlapping?
+    //method_type2 = 22,
+    annotated_type: AnnotatedType,
+    annotated_with_self_type: AnnotatedWithSelfType,
+    existential_type: ExistentialType,
+
+    fn debug(header: Header, table: *const SymbolTable) void {
+        _ = table;
+        switch (header) {
+            .term_name => |name| std.debug.print("TermName = \"{s}\"\n", .{name.name}),
+            .type_name => |name| std.debug.print("Typenamee = \"{s}\"\n", .{name.name}),
+            else => |item| std.debug.print("{}\n", .{item}),
+        }
+        //std.debug.print("{}\n", .{header});
+    }
+};
+
+const TermName = struct {
+    name: []u8,
+};
+
+const TypeName = struct {
+    name: []u8,
+};
+
+const NoSymbol = struct {};
+
+const TypeSymbol = struct {};
+
+const AliasSymbol = struct {};
+
+const ClassSymbol = struct {
+    symbol: SymbolInfo,
+    this_type_ref: ?u32,
+
+    fn read(data: []u8) !ClassSymbol {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return .{
+            .symbol = try SymbolInfo.read2(reader),
+            .this_type_ref = readVar(u32, reader) catch null,
+        };
+    }
+};
+
+const ObjectSymbol = struct {
+    symbol: SymbolInfo,
+};
+
+const MethodSymbol = struct {
+    symbol: SymbolInfo,
+    alias: ?u32,
+
+    fn read(data: []u8) !MethodSymbol {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return MethodSymbol{
+            .symbol = try SymbolInfo.read2(reader),
+            .alias = readVar(u32, reader) catch null,
+        };
+    }
+};
+
+const NoType = struct {};
+
+const NoPrefixType = struct {};
+
+const SingleType = struct {
+    type_ref: u32,
+    symbol_ref: u32,
+
+    fn read(data: []u8) !SingleType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        std.debug.print("data = {any}\n", .{data});
+
+        return SingleType{
+            .type_ref = try readVar(u32, reader),
+            .symbol_ref = try readVar(u32, reader),
+        };
+    }
+};
+
+const ConstantType = struct {};
+
+const TypeBoundsType = struct {};
+
+const RefinedType = struct {};
+
+const AnnotatedType = struct {};
+
+const AnnotatedWithSelfType = struct {};
+
+const ExistentialType = struct {};
+
+const PolyType = struct {};
+
 const SymbolHeader = struct {
-    header_type: Header,
+    header_type: HeaderType,
     offset: u64,
     size: u32,
     header_size: u8,
@@ -487,7 +584,72 @@ const SymbolHeader = struct {
     fn dataSlice(self: SymbolHeader, data: []u8) []u8 {
         return data[self.dataOffset() .. self.dataOffset() + self.size];
     }
+
+    fn read(self: SymbolHeader, table: *const SymbolTable, data: []u8) !Header {
+        // const info = @typeInfo(Header).Union;
+        //
+        // inline for (info.fields) |field| {
+        //     if (std.mem.eql(u8, field.name, @tagName(self.header_type))) {
+        //         return field.type.read(table, data);
+        //     }
+        // }
+        //
+        // unreachable;
+
+        _ = table;
+        return switch (self.header_type) {
+            .term_name => .{ .term_name = .{ .name = data } },
+            .type_name => .{ .type_name = .{ .name = data } },
+            .no_symbol => .{ .no_symbol = .{} },
+            .type_ref_type => .{ .type_ref_type = try TypeRefType.read(data) },
+
+            .class_symbol => .{ .class_symbol = try ClassSymbol.read(data) },
+            .object_symbol => .{ .object_symbol = .{ .symbol = try SymbolInfo.read(data) } },
+            .method_symbol => .{ .method_symbol = try MethodSymbol.read(data) },
+            .ext_ref => .{ .ext_ref = try ExtRef.read(data) },
+
+            .this_type => .{ .this_type = try ThisType.read(data) },
+            .single_type => .{ .single_type = try SingleType.read(data) },
+
+            .class_info_type => .{ .class_info_type = try ClassInfoType.read(data) },
+            .method_type => .{ .method_type = try MethodType.read(data) },
+
+            .ext_mod_class_ref => .{ .ext_mod_class_ref = try ExtModClassRef.read(data) },
+
+            else => {
+                std.debug.print("header_type = {}\n", .{self.header_type});
+                unreachable;
+            },
+        };
+    }
 };
+
+// term_name: TermName,
+// type_name: TypeName,
+// no_symbol: NoSymbol,
+// type_symbol: TypeSymbol,
+// alias_symbol: AliasSymbol,
+// class_symbol: ClassSymbol,
+// object_symbol: ObjectSymbol,
+// method_symbol: MethodSymbol,
+// ext_ref: ExtRef,
+// ext_mod_class_ref: ExtModClassRef,
+// no_type: NoType,
+// no_prefix_type: NoPrefixType,
+// this_type: ThisType,
+// single_type: SingleType,
+// constant_type: ConstantType,
+// type_ref_type: TypeRefType,
+// type_bounds_type: TypeBoundsType,
+// refined_type: RefinedType,
+// class_info_type: ClassInfoType,
+// method_type: MethodType,
+// poly_type: PolyType,
+// //NullaryMethodType = 21, // overlapping?
+// //method_type2 = 22,
+// annotated_type: AnnotatedType,
+// annotated_with_self_type: AnnotatedWithSelfType,
+// existential_type: ExistentialType,
 
 const SymbolTable = struct {
     major_version: u32,
@@ -538,7 +700,7 @@ const SymbolTable = struct {
         });
 
         for (table.headers, 0..) |h, i| {
-            std.debug.print("{d:>4}. header = {s:<15}, size = {d:>4}, offset = 0x{x:0>4}, data_offset = 0x{x:0>4}\n", .{
+            std.debug.print("{d:>4}. header = {s:<18}, size = {d:>4}, offset = 0x{x:0>4}, data_offset = 0x{x:0>4}\n", .{
                 i,
                 @tagName(h.header_type),
                 h.size,
