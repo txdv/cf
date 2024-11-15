@@ -743,7 +743,11 @@ const SymbolTable = struct {
                 const name = table.lookupTermName(method_symbol.symbol.name);
                 const method_type = table.h[method_symbol.symbol.info].method_type;
 
-                try writer.print("  def {s}(", .{name});
+                const is_constructor = std.mem.eql(u8, name, "<init>");
+
+                const scala_name = if (is_constructor) "this" else name;
+
+                try writer.print("  def {s}(", .{scala_name});
                 for (method_type.param_symbols) |param_symbol| {
                     try table.printMethodArg(writer, table.h[param_symbol]);
                 }
@@ -751,14 +755,18 @@ const SymbolTable = struct {
 
                 const return_type = table.h[method_type.result_type];
 
-                //try writer.print("\n", .{});
-                try table.printMethodReturnType(writer, return_type);
+                if (!is_constructor) {
+                    try writer.print(": ", .{});
+                    try table.printMethodReturnType(writer, return_type);
+                }
+                try writer.print(" = {{ /* compiled code */ }}\n", .{});
             },
             else => {},
         }
     }
 
     fn printMethodReturnType(table: SymbolTable, writer: anytype, h: Header) !void {
+        //std.debug.print("->{}\n", .{h});
         switch (h) {
             .type_ref_type => |type_ref_type| {
                 try table.printMethodReturnType(writer, table.h[type_ref_type.type_ref]);
@@ -769,16 +777,11 @@ const SymbolTable = struct {
             },
             .ext_mod_class_ref => |ext_mod_class_ref| {
                 const term_name = table.lookupTermName(ext_mod_class_ref.name);
-                if (!std.mem.eql(u8, term_name, "<empty>")) {
-                    try writer.print(": {s}.", .{term_name});
-                } else {
-                    try writer.print(" = {{ /* compiled code */ }}\n", .{});
-                }
+                try writer.print("{s}.", .{term_name});
             },
             .ext_ref => |ext_ref| {
                 const term_name = table.lookupTypeName(ext_ref.name);
                 try writer.print("{s}", .{term_name});
-                try writer.print(" = {{ /* compiled code */ }}\n", .{});
             },
             else => {},
         }
@@ -797,7 +800,6 @@ const SymbolTable = struct {
                 if (ext_mod_class_ref.symbol) |symbol| {
                     try table.printMethodType(writer, table.h[symbol]);
                 }
-                //try table.printMethodType(writer, table[ext_mod_class_ref.symbol]);
                 const term_name = table.lookupTermName(ext_mod_class_ref.name);
                 if (!std.mem.eql(u8, term_name, "<empty>")) {
                     try writer.print("{s}.", .{term_name});
