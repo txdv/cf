@@ -678,8 +678,8 @@ const SymbolTable = struct {
                 try writer.print("object {s}", .{
                     table.lookupTermName(object_symbol.symbol.name),
                 });
-                const class = table.findClass(object_symbol.symbol.name).?;
-                const class_info = table.h[class.symbol.info].class_info_type;
+                const class_result = table.findClass(object_symbol.symbol.name).?;
+                const class_info = table.h[class_result.class.symbol.info].class_info_type;
 
                 for (class_info.type_refs, 0..) |type_ref, i| {
                     if (i == 0) {
@@ -691,11 +691,13 @@ const SymbolTable = struct {
                 }
                 try writer.print(" {{\n", .{});
 
-                for (table.h, 0..) |h, i| {
+                for (table.h) |h| {
                     switch (h) {
                         .method_symbol => |method_symbol| {
-                            const name = table.lookupTermName(method_symbol.symbol.name);
-                            std.debug.print("{}. = {s}\n", .{ i, name });
+                            if (method_symbol.symbol.symbol == class_result.i) {
+                                //const name = table.lookupTermName(method_symbol.symbol.name);
+                                try table.printMethod(writer, h);
+                            }
                         },
                         else => {},
                     }
@@ -734,15 +736,65 @@ const SymbolTable = struct {
         }
     }
 
-    fn findClass(table: SymbolTable, name: u32) ?ClassSymbol {
+    fn printMethod(table: SymbolTable, writer: anytype, h: Header) !void {
+        switch (h) {
+            .method_symbol => |method_symbol| {
+                //std.debug.print("{}\n", .{method_symbol.symbol.name});
+                const name = table.lookupTermName(method_symbol.symbol.name);
+                const method_type = table.h[method_symbol.symbol.info].method_type;
+
+                try writer.print("  def {s}(", .{name});
+                for (method_type.param_symbols) |param_symbol| {
+                    try writer.print("{}", .{param_symbol});
+                }
+                //try writer.print("{}", .{method_type});
+                //try table.printType(writer, return_type);
+                try writer.print(")", .{});
+
+                const return_type = table.h[method_type.result_type];
+
+                //try writer.print("\n", .{});
+                try table.printMethodReturnType(writer, return_type);
+            },
+            else => {},
+        }
+    }
+
+    fn printMethodReturnType(table: SymbolTable, writer: anytype, h: Header) !void {
+        switch (h) {
+            .type_ref_type => |type_ref_type| {
+                try table.printMethodReturnType(writer, table.h[type_ref_type.type_ref]);
+                try table.printMethodReturnType(writer, table.h[type_ref_type.symbol_ref]);
+            },
+            .this_type => |this_type| {
+                try table.printMethodReturnType(writer, table.h[this_type.symbol]);
+            },
+            .ext_mod_class_ref => |ext_mod_class_ref| {
+                const term_name = table.lookupTermName(ext_mod_class_ref.name);
+                if (!std.mem.eql(u8, term_name, "<empty>")) {
+                    try writer.print(": {s}.", .{term_name});
+                } else {
+                    try writer.print(" = {{ /* compiled code */ }}\n", .{});
+                }
+            },
+            .ext_ref => |ext_ref| {
+                const term_name = table.lookupTypeName(ext_ref.name);
+                try writer.print("{s}", .{term_name});
+                try writer.print(" = {{ /* compiled code */ }}\n", .{});
+            },
+            else => {},
+        }
+    }
+
+    fn findClass(table: SymbolTable, name: u32) ?struct { i: usize, class: ClassSymbol } {
         const n = table.lookupTermName(name);
-        for (table.h) |header| {
+        for (table.h, 0..) |header, i| {
             switch (header) {
                 .class_symbol => |class_symbol| {
                     const class_name = table.lookupTypeName(class_symbol.symbol.name);
                     if (std.mem.eql(u8, n, class_name)) {
                         //std.debug.print("{s}\n", .{class_name});
-                        return class_symbol;
+                        return .{ .i = i, .class = class_symbol };
                     }
                 },
                 else => {},
