@@ -213,8 +213,6 @@ pub fn main() !void {
         table.debug();
 
         try table.print();
-
-        //debug(&table);
     }
 }
 
@@ -501,7 +499,20 @@ const AnnotatedWithSelfType = struct {};
 
 const ExistentialType = struct {};
 
-const PolyType = struct {};
+const PolyType = struct {
+    type_ref: u32,
+    symbols: []u8,
+
+    fn read(data: []u8) !PolyType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return PolyType{
+            .type_ref = try readVar(u32, reader),
+            .symbols = data[try stream.getPos()..],
+        };
+    }
+};
 
 const SymbolHeader = struct {
     header_type: HeaderType,
@@ -539,14 +550,14 @@ const SymbolHeader = struct {
             .object_symbol => .{ .object_symbol = .{ .symbol = try SymbolInfo.read(data) } },
             .method_symbol => .{ .method_symbol = try MethodSymbol.read(data) },
             .ext_ref => .{ .ext_ref = try ExtRef.read(data) },
+            .ext_mod_class_ref => .{ .ext_mod_class_ref = try ExtModClassRef.read(data) },
 
             .this_type => .{ .this_type = try ThisType.read(data) },
             .single_type => .{ .single_type = try SingleType.read(data) },
 
             .class_info_type => .{ .class_info_type = try ClassInfoType.read(data) },
             .method_type => .{ .method_type = try MethodType.read(data) },
-
-            .ext_mod_class_ref => .{ .ext_mod_class_ref = try ExtModClassRef.read(data) },
+            .poly_type => .{ .poly_type = try PolyType.read(data) },
 
             else => {
                 std.debug.print("header_type = {}\n", .{self.header_type});
@@ -669,7 +680,6 @@ const SymbolTable = struct {
     }
 
     fn print(table: SymbolTable) !void {
-        //table.debug();
         const stdout = std.io.getStdOut();
         const writer = stdout.writer();
 
@@ -679,35 +689,44 @@ const SymbolTable = struct {
                     table.lookupTermName(object_symbol.symbol.name),
                 });
                 const class_result = table.findClass(object_symbol.symbol.name).?;
-                const class_info = table.h[class_result.class.symbol.info].class_info_type;
 
-                for (class_info.type_refs, 0..) |type_ref, i| {
-                    if (i == 0) {
-                        try writer.print(" extends ", .{});
-                    } else if (i == 1) {
-                        try writer.print(" with ", .{});
-                    }
-                    try table.printType(writer, table.h[type_ref]);
-                }
-                try writer.print(" {{\n", .{});
-
-                for (table.h) |h| {
-                    switch (h) {
-                        .method_symbol => |method_symbol| {
-                            if (method_symbol.symbol.symbol == class_result.i) {
-                                //const name = table.lookupTermName(method_symbol.symbol.name);
-                                try table.printMethod(writer, h);
-                            }
-                        },
-                        else => {},
-                    }
-                }
-
-                try writer.print("}}\n", .{});
+                try table.printClass(writer, class_result.i);
+            },
+            .class_symbol => {
+                try table.printClass(writer, 0);
             },
             else => {},
         }
-        //std.debug.print("MENSCH! \n", .{table});
+    }
+
+    fn printClass(table: SymbolTable, writer: anytype, class_index: usize) !void {
+        const class_info_index = table.h[class_index].class_symbol.symbol.info;
+
+        const class_info = table.h[class_info_index].class_info_type;
+
+        for (class_info.type_refs, 0..) |type_ref, i| {
+            if (i == 0) {
+                try writer.print(" extends ", .{});
+            } else if (i == 1) {
+                try writer.print(" with ", .{});
+            }
+            try table.printType(writer, table.h[type_ref]);
+        }
+        try writer.print(" {{\n", .{});
+
+        for (table.h) |h| {
+            switch (h) {
+                .method_symbol => |method_symbol| {
+                    if (method_symbol.symbol.symbol == class_index) {
+                        //const name = table.lookupTermName(method_symbol.symbol.name);
+                        try table.printMethod(writer, h);
+                    }
+                },
+                else => {},
+            }
+        }
+
+        try writer.print("}}\n", .{});
     }
 
     fn printType(table: SymbolTable, writer: anytype, h: Header) !void {
@@ -739,7 +758,6 @@ const SymbolTable = struct {
     fn printMethod(table: SymbolTable, writer: anytype, h: Header) !void {
         switch (h) {
             .method_symbol => |method_symbol| {
-                //std.debug.print("{}\n", .{method_symbol.symbol.name});
                 const name = table.lookupTermName(method_symbol.symbol.name);
                 const method_type = table.h[method_symbol.symbol.info].method_type;
 
