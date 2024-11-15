@@ -745,10 +745,8 @@ const SymbolTable = struct {
 
                 try writer.print("  def {s}(", .{name});
                 for (method_type.param_symbols) |param_symbol| {
-                    try writer.print("{}", .{param_symbol});
+                    try table.printMethodArg(writer, table.h[param_symbol]);
                 }
-                //try writer.print("{}", .{method_type});
-                //try table.printType(writer, return_type);
                 try writer.print(")", .{});
 
                 const return_type = table.h[method_type.result_type];
@@ -783,6 +781,76 @@ const SymbolTable = struct {
                 try writer.print(" = {{ /* compiled code */ }}\n", .{});
             },
             else => {},
+        }
+    }
+
+    fn printMethodType(table: SymbolTable, writer: anytype, h: Header) !void {
+        switch (h) {
+            .type_ref_type => |type_ref_type| {
+                try table.printMethodType(writer, table.h[type_ref_type.type_ref]);
+                try table.printMethodType(writer, table.h[type_ref_type.symbol_ref]);
+            },
+            .this_type => |this_type| {
+                try table.printMethodReturnType(writer, table.h[this_type.symbol]);
+            },
+            .ext_mod_class_ref => |ext_mod_class_ref| {
+                if (ext_mod_class_ref.symbol) |symbol| {
+                    try table.printMethodType(writer, table.h[symbol]);
+                }
+                //try table.printMethodType(writer, table[ext_mod_class_ref.symbol]);
+                const term_name = table.lookupTermName(ext_mod_class_ref.name);
+                if (!std.mem.eql(u8, term_name, "<empty>")) {
+                    try writer.print("{s}.", .{term_name});
+                }
+            },
+            .ext_ref => |ext_ref| {
+                if (ext_ref.symbol) |symbol| {
+                    try table.printMethodType(writer, table.h[symbol]);
+                }
+                const term_name = table.lookupTypeName(ext_ref.name);
+                try writer.print("{s}", .{term_name});
+            },
+            else => {},
+        }
+    }
+
+    fn printMethodArg(table: SymbolTable, writer: anytype, h: Header) !void {
+        switch (h) {
+            .method_symbol => |method_symbol| {
+                const argName = table.lookupTermName(method_symbol.symbol.name);
+                try writer.print("{s}: ", .{argName});
+                try table.printMethodArg(writer, table.h[method_symbol.symbol.info]);
+            },
+            .type_ref_type => |type_ref_type| {
+                try table.printMethodArg(writer, table.h[type_ref_type.type_ref]);
+                try table.printMethodArg(writer, table.h[type_ref_type.symbol_ref]);
+
+                if (type_ref_type.type_args.len > 0) {
+                    try writer.print("[", .{});
+
+                    for (type_ref_type.type_args) |arg| {
+                        try table.printMethodType(writer, table.h[arg]);
+                        //try writer.print("{}", .{arg});
+                    }
+
+                    try writer.print("]", .{});
+                }
+            },
+            .this_type => |this_type| {
+                try table.printMethodArg(writer, table.h[this_type.symbol]);
+            },
+            .ext_mod_class_ref => |ext_mod_class_ref| {
+                const term_name = table.lookupTermName(ext_mod_class_ref.name);
+                try writer.print("{s}.", .{term_name});
+            },
+            .ext_ref => |ext_ref| {
+                const term_name = table.lookupTypeName(ext_ref.name);
+                try writer.print("{s}", .{term_name});
+            },
+            else => {
+                std.debug.print("debug = {}\n", .{h});
+                unreachable;
+            },
         }
     }
 
