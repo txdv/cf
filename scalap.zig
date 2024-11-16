@@ -2,7 +2,7 @@ const std = @import("std");
 const ClassFile = @import("src/ClassFile.zig");
 const ConstantPool = @import("src/ConstantPool.zig");
 const attributes = @import("src/attributes.zig");
-const AttributeInfo = attributes.AttributeInfo;
+const ClassAttributeInfo = attributes.AttributeInfo;
 const Annotation = attributes.Annotation;
 const RuntimeVisibleAnnotationsAttribute = attributes.RuntimeVisibleAnnotationsAttribute;
 
@@ -12,7 +12,7 @@ const FileData = Utils.FileData;
 fn findScalaSig(cf: *ClassFile) ?[]u8 {
     for (cf.attributes.items) |attribute| {
         switch (attribute) {
-            AttributeInfo.runtime_visible_annotations => |runtime_annotation| {
+            ClassAttributeInfo.runtime_visible_annotations => |runtime_annotation| {
                 for (runtime_annotation.annotations) |annotation| {
                     const type_name = readString(cf.constant_pool, annotation.type_index);
 
@@ -241,6 +241,19 @@ const MethodType = struct {
     }
 };
 
+const NullaryMethodType = struct {
+    result_type: u32,
+
+    fn read(data: []u8) !NullaryMethodType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return NullaryMethodType{
+            .result_type = try readVar(u32, reader),
+        };
+    }
+};
+
 const ClassInfoType = struct {
     symbol: u32,
     type_refs: []u8,
@@ -374,9 +387,11 @@ const HeaderType = enum(u8) {
     refined_type = 18,
     class_info_type = 19,
     method_type = 20,
-    poly_type = 21,
-    //NullaryMethodType = 21, // overlapping?
+    //poly_type = 21, // TODO: can be poly type for old versions?
+    nullary_method_type = 21,
     //method_type2 = 22,
+    name_ref = 33,
+    attribute_info = 40,
     annotated_type = 42,
     annotated_with_self_type = 51,
     existential_type = 48,
@@ -403,9 +418,12 @@ const Header = union(HeaderType) {
     refined_type: RefinedType,
     class_info_type: ClassInfoType,
     method_type: MethodType,
-    poly_type: PolyType,
+    //poly_type: PolyType,
+    nullary_method_type: NullaryMethodType,
     //NullaryMethodType = 21, // overlapping?
     //method_type2 = 22,
+    name_ref: u32,
+    attribute_info: AttributeInfo,
     annotated_type: AnnotatedType,
     annotated_with_self_type: AnnotatedWithSelfType,
     existential_type: ExistentialType,
@@ -422,15 +440,32 @@ const Header = union(HeaderType) {
 
 const TermName = struct {
     name: []u8,
+
+    fn read(data: []u8) TermName {
+        return .{
+            .name = data,
+        };
+    }
 };
 
 const TypeName = struct {
     name: []u8,
+
+    fn read(data: []u8) TypeName {
+        return .{
+            .name = data,
+        };
+    }
 };
 
 const NoSymbol = struct {};
 
-const TypeSymbol = struct {};
+const TypeSymbol = struct {
+    fn read(data: []u8) !TypeSymbol {
+        _ = data;
+        return TypeSymbol{};
+    }
+};
 
 const AliasSymbol = struct {};
 
@@ -489,9 +524,29 @@ const SingleType = struct {
 
 const ConstantType = struct {};
 
-const TypeBoundsType = struct {};
+const TypeBoundsType = struct {
+    fn read(data: []u8) !TypeBoundsType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+        _ = reader;
 
-const RefinedType = struct {};
+        return .{};
+    }
+};
+
+const RefinedType = struct {
+    class_sym: u32,
+    type_refs: []u8,
+
+    fn read(data: []u8) !RefinedType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+        return RefinedType{
+            .class_sym = try readVar(u32, reader),
+            .type_refs = data[try stream.getPos()..],
+        };
+    }
+};
 
 const AnnotatedType = struct {};
 
@@ -510,6 +565,27 @@ const PolyType = struct {
         return PolyType{
             .type_ref = try readVar(u32, reader),
             .symbols = data[try stream.getPos()..],
+        };
+    }
+};
+
+const AttributeInfo = struct {
+    symbol: u32,
+    type_ref: u32,
+
+    fn read(data: []u8) !AttributeInfo {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        const symbol = try readVar(u32, reader);
+        const type_ref = try readVar(u32, reader);
+        const bytes = try reader.readByte();
+
+        std.debug.print("test = {}\n", .{bytes});
+
+        return AttributeInfo{
+            .symbol = symbol,
+            .type_ref = type_ref,
         };
     }
 };
@@ -541,23 +617,32 @@ const SymbolHeader = struct {
 
         _ = table;
         return switch (self.header_type) {
-            .term_name => .{ .term_name = .{ .name = data } },
-            .type_name => .{ .type_name = .{ .name = data } },
+            .term_name => .{ .term_name = TermName.read(data) },
+            .type_name => .{ .type_name = TypeName.read(data) },
             .no_symbol => .{ .no_symbol = .{} },
+            .type_symbol => .{ .type_symbol = try TypeSymbol.read(data) },
+            .alias_symbol => .{ .alias_symbol = .{} },
             .type_ref_type => .{ .type_ref_type = try TypeRefType.read(data) },
+            .type_bounds_type => .{ .type_bounds_type = try TypeBoundsType.read(data) },
 
             .class_symbol => .{ .class_symbol = try ClassSymbol.read(data) },
             .object_symbol => .{ .object_symbol = .{ .symbol = try SymbolInfo.read(data) } },
             .method_symbol => .{ .method_symbol = try MethodSymbol.read(data) },
             .ext_ref => .{ .ext_ref = try ExtRef.read(data) },
             .ext_mod_class_ref => .{ .ext_mod_class_ref = try ExtModClassRef.read(data) },
+            .no_type => .{ .no_type = .{} },
+            .no_prefix_type => .{ .no_prefix_type = .{} },
 
             .this_type => .{ .this_type = try ThisType.read(data) },
             .single_type => .{ .single_type = try SingleType.read(data) },
 
+            .refined_type => .{ .refined_type = try RefinedType.read(data) },
             .class_info_type => .{ .class_info_type = try ClassInfoType.read(data) },
             .method_type => .{ .method_type = try MethodType.read(data) },
-            .poly_type => .{ .poly_type = try PolyType.read(data) },
+            //.poly_type => .{ .poly_type = try PolyType.read(data) },
+            .nullary_method_type => .{ .nullary_method_type = try NullaryMethodType.read(data) },
+            .name_ref => .{ .name_ref = data[0] },
+            .attribute_info => .{ .attribute_info = try AttributeInfo.read(data) },
 
             else => {
                 std.debug.print("header_type = {}\n", .{self.header_type});
@@ -622,7 +707,9 @@ const SymbolTable = struct {
         while (i < symbol_count) {
             const offset = try stream.getPos();
 
-            symbol_table.headers[i].header_type = @enumFromInt(try reader.readByte());
+            const header_byte = try reader.readByte();
+            std.debug.print("header_type = {}\n", .{header_byte});
+            symbol_table.headers[i].header_type = @enumFromInt(header_byte);
             symbol_table.headers[i].size = try readVar(u32, reader);
             symbol_table.headers[i].offset = offset;
             symbol_table.headers[i].header_size = @truncate(try stream.getPos() - offset);
@@ -692,7 +779,10 @@ const SymbolTable = struct {
 
                 try table.printClass(writer, class_result.i);
             },
-            .class_symbol => {
+            .class_symbol => |class_symbol| {
+                try writer.print("class {s}", .{
+                    table.lookupTypeName(class_symbol.symbol.name),
+                });
                 try table.printClass(writer, 0);
             },
             else => {},
@@ -718,7 +808,6 @@ const SymbolTable = struct {
             switch (h) {
                 .method_symbol => |method_symbol| {
                     if (method_symbol.symbol.symbol == class_index) {
-                        //const name = table.lookupTermName(method_symbol.symbol.name);
                         try table.printMethod(writer, h);
                     }
                 },
@@ -759,49 +848,96 @@ const SymbolTable = struct {
         switch (h) {
             .method_symbol => |method_symbol| {
                 const name = table.lookupTermName(method_symbol.symbol.name);
-                const method_type = table.h[method_symbol.symbol.info].method_type;
 
                 const is_constructor = std.mem.eql(u8, name, "<init>");
 
                 const scala_name = if (is_constructor) "this" else name;
 
-                try writer.print("  def {s}(", .{scala_name});
-                for (method_type.param_symbols) |param_symbol| {
-                    try table.printMethodArg(writer, table.h[param_symbol]);
-                }
-                try writer.print(")", .{});
+                try writer.print("  def {s}", .{scala_name});
 
-                const return_type = table.h[method_type.result_type];
+                std.debug.print("method_name: {s}\n", .{scala_name});
 
-                if (!is_constructor) {
-                    try writer.print(": ", .{});
-                    try table.printMethodReturnType(writer, return_type);
+                switch (table.h[method_symbol.symbol.info]) {
+                    .method_type => |method_type| {
+                        try writer.print("(", .{});
+
+                        for (method_type.param_symbols) |param_symbol| {
+                            try table.printMethodArg(writer, table.h[param_symbol]);
+                        }
+                        try writer.print(")", .{});
+
+                        const return_type = table.h[method_type.result_type];
+
+                        if (!is_constructor) {
+                            try writer.print(": ", .{});
+                            try table.printMethodReturnType(writer, return_type);
+                        }
+                        try writer.print(" = {{ /* compiled code */ }}\n", .{});
+                    },
+                    .nullary_method_type => |nullary_method_type| {
+                        try writer.print(": ", .{});
+                        try table.printMethodReturnType(writer, table.h[nullary_method_type.result_type]);
+                        try writer.print("\n", .{});
+                    },
+                    else => {
+                        std.debug.print("\n{}\n", .{table.h[method_symbol.symbol.info]});
+                        unreachable;
+                    },
                 }
-                try writer.print(" = {{ /* compiled code */ }}\n", .{});
             },
             else => {},
         }
     }
 
     fn printMethodReturnType(table: SymbolTable, writer: anytype, h: Header) !void {
-        //std.debug.print("->{}\n", .{h});
+        std.debug.print("==> {}\n", .{h});
         switch (h) {
             .type_ref_type => |type_ref_type| {
-                try table.printMethodReturnType(writer, table.h[type_ref_type.type_ref]);
                 try table.printMethodReturnType(writer, table.h[type_ref_type.symbol_ref]);
+
+                if (type_ref_type.type_args.len > 0) {
+                    try writer.print("[", .{});
+
+                    for (type_ref_type.type_args, 0..) |type_arg, i| {
+                        if (i > 0) {
+                            try writer.print(", ", .{});
+                        }
+
+                        try table.printMethodReturnType(writer, table.h[type_arg]);
+                    }
+                    try writer.print("]", .{});
+                }
             },
             .this_type => |this_type| {
                 try table.printMethodReturnType(writer, table.h[this_type.symbol]);
             },
             .ext_mod_class_ref => |ext_mod_class_ref| {
-                const term_name = table.lookupTermName(ext_mod_class_ref.name);
-                try writer.print("{s}.", .{term_name});
+                if (ext_mod_class_ref.symbol) |symbol| {
+                    try table.printMethodReturnType(writer, table.h[symbol]);
+                } else {
+                    const term_name = table.lookupTermName(ext_mod_class_ref.name);
+                    try writer.print("{s}.", .{term_name});
+                }
             },
             .ext_ref => |ext_ref| {
+                if (ext_ref.symbol) |symbol| {
+                    try table.printMethodReturnType(writer, table.h[symbol]);
+                }
                 const term_name = table.lookupTypeName(ext_ref.name);
                 try writer.print("{s}", .{term_name});
             },
-            else => {},
+            .single_type => |single_type| {
+                _ = single_type;
+                //try table.printMethodReturnType(writer, table.h[single_type.type_ref]);
+                //try writer.print("{s}", .{single_type.type_ref});
+            },
+            //.single_type => |single_type| {
+            //std.debug.print("\nunreachable => {}\n", .{single_type});
+            //},
+            else => {
+                std.debug.print("\nunreachable => {}\n", .{h});
+                unreachable;
+            },
         }
     }
 
@@ -881,7 +1017,6 @@ const SymbolTable = struct {
                 .class_symbol => |class_symbol| {
                     const class_name = table.lookupTypeName(class_symbol.symbol.name);
                     if (std.mem.eql(u8, n, class_name)) {
-                        //std.debug.print("{s}\n", .{class_name});
                         return .{ .i = i, .class = class_symbol };
                     }
                 },
