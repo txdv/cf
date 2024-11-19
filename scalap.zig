@@ -157,25 +157,28 @@ fn decode7to8(src: []u8, srclen: usize) usize {
     return dstlen;
 }
 
-fn readVarInt32(reader: anytype) !i32 {
-    var result: i32 = 0;
-    var shift: u5 = 0;
+fn readVar(comptime t: anytype, reader: anytype) !t {
+    var result: t = 0;
 
     while (true) {
-        const b: u8 = try reader.readByte();
-        result |= (@as(i32, b) & 0x7f) << shift;
+        const b: u8 = reader.readByte();
+        result |= (@as(t, b) & 0x7f);
         if ((b & 0x80) != 0x80) break;
-        shift += 7;
+        result = result << 7;
     }
 
     return result;
 }
 
-fn readVar(comptime t: anytype, reader: anytype) !t {
+fn readVarData(comptime t: anytype, data: []u8) t {
     var result: t = 0;
 
-    while (true) {
-        const b: u8 = try reader.readByte();
+    var pos: usize = 0;
+
+    while (pos < data.len) {
+        const b: u8 = data[pos];
+        pos += 1;
+
         result |= (@as(u32, b) & 0x7f);
         if ((b & 0x80) != 0x80) break;
         result = result << 7;
@@ -254,9 +257,41 @@ const NullaryMethodType = struct {
     }
 };
 
+const TypeRefs = struct {
+    refs: []u8,
+
+    const Iterator = struct {
+        pos: usize,
+        refs: []const u8,
+
+        fn next(it: *Iterator) ?u32 {
+            if (it.pos >= it.refs.len) {
+                return null;
+            }
+
+            var result: u32 = 0;
+
+            while (it.pos < it.refs.len) {
+                const b: u8 = it.refs[it.pos];
+                it.pos += 1;
+
+                result |= (@as(u32, b) & 0x7f);
+                if ((b & 0x80) != 0x80) break;
+                result = result << 7;
+            }
+
+            return result;
+        }
+    };
+
+    fn iterator(self: TypeRefs) Iterator {
+        return .{ .pos = 0, .refs = self.refs };
+    }
+};
+
 const ClassInfoType = struct {
     symbol: u32,
-    type_refs: []u8,
+    type_refs: TypeRefs,
 
     fn read(data: []u8) !ClassInfoType {
         var stream = std.io.fixedBufferStream(data);
@@ -264,7 +299,7 @@ const ClassInfoType = struct {
 
         return ClassInfoType{
             .symbol = try readVar(u32, reader),
-            .type_refs = data[try stream.getPos()..],
+            .type_refs = TypeRefs{ .refs = data[try stream.getPos()..] },
         };
     }
 };
@@ -331,7 +366,7 @@ const TypeRefType = struct {
 const SymbolInfo = struct {
     name: u32,
     symbol: u32,
-    flags: u32,
+    flags: Flags,
     private_within: ?u32,
     info: u32,
 
@@ -345,7 +380,7 @@ const SymbolInfo = struct {
     fn read2(reader: anytype) !SymbolInfo {
         const name = try readVar(u32, reader);
         const symbol = try readVar(u32, reader);
-        const flags = try readVar(u32, reader);
+        const flags = .{ .value = try readVar(u64, reader) };
         const private_within = try readVar(u32, reader);
         const info = readVar(u32, reader) catch {
             return SymbolInfo{
@@ -390,6 +425,8 @@ const HeaderType = enum(u8) {
     //poly_type = 21, // TODO: can be poly type for old versions?
     nullary_method_type = 21,
     //method_type2 = 22,
+    constant_bool = 25,
+    constant_long = 30,
     name_ref = 33,
     attribute_info = 40,
     annotated_type = 42,
@@ -422,6 +459,8 @@ const Header = union(HeaderType) {
     nullary_method_type: NullaryMethodType,
     //NullaryMethodType = 21, // overlapping?
     //method_type2 = 22,
+    constant_bool: bool,
+    constant_long: u64,
     name_ref: u32,
     attribute_info: AttributeInfo,
     annotated_type: AnnotatedType,
@@ -433,6 +472,10 @@ const Header = union(HeaderType) {
         switch (header) {
             .term_name => |name| std.debug.print("TermName = \"{s}\"\n", .{name.name}),
             .type_name => |name| std.debug.print("TypeName = \"{s}\"\n", .{name.name}),
+            .refined_type => |refined_type| {
+                std.debug.print("{}\n", .{refined_type});
+                std.debug.print("refined_type.type_refs = {}\n", .{refined_type.type_refs});
+            },
             else => |item| std.debug.print("{}\n", .{item}),
         }
     }
@@ -522,7 +565,18 @@ const SingleType = struct {
     }
 };
 
-const ConstantType = struct {};
+const ConstantType = struct {
+    ref: u32,
+
+    fn read(data: []u8) !ConstantType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return .{
+            .ref = try readVar(u32, reader),
+        };
+    }
+};
 
 const TypeBoundsType = struct {
     fn read(data: []u8) !TypeBoundsType {
@@ -536,14 +590,14 @@ const TypeBoundsType = struct {
 
 const RefinedType = struct {
     class_sym: u32,
-    type_refs: []u8,
+    type_refs: TypeRefs,
 
     fn read(data: []u8) !RefinedType {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader();
         return RefinedType{
             .class_sym = try readVar(u32, reader),
-            .type_refs = data[try stream.getPos()..],
+            .type_refs = .{ .refs = data[try stream.getPos()..] },
         };
     }
 };
@@ -552,7 +606,12 @@ const AnnotatedType = struct {};
 
 const AnnotatedWithSelfType = struct {};
 
-const ExistentialType = struct {};
+const ExistentialType = struct {
+    fn read(data: []u8) ExistentialType {
+        _ = data;
+        return .{};
+    }
+};
 
 const PolyType = struct {
     type_ref: u32,
@@ -644,6 +703,13 @@ const SymbolHeader = struct {
             .name_ref => .{ .name_ref = data[0] },
             .attribute_info => .{ .attribute_info = try AttributeInfo.read(data) },
 
+            .constant_long => .{ .constant_long = readVarData(u64, data) },
+            .constant_bool => .{ .constant_bool = data[0] != 0 },
+
+            .existential_type => .{ .existential_type = ExistentialType.read(data) },
+
+            .constant_type => .{ .constant_type = try ConstantType.read(data) },
+
             else => {
                 std.debug.print("header_type = {}\n", .{self.header_type});
                 unreachable;
@@ -679,6 +745,157 @@ const SymbolHeader = struct {
 // annotated_with_self_type: AnnotatedWithSelfType,
 // existential_type: ExistentialType,
 
+const FlagValues = .{
+    .{ .name = "implicit", .value = 0x00000001 },
+    .{ .name = "final", .value = 0x00000002 },
+    .{ .name = "private", .value = 0x00000004 },
+    .{ .name = "protected", .value = 0x00000008 },
+
+    .{ .name = "sealed", .value = 0x00000010 },
+    .{ .name = "override", .value = 0x00000020 },
+    .{ .name = "override", .value = 0x00000040 },
+    .{ .name = "abstract", .value = 0x00000080 },
+};
+
+const FlagValue = struct { name: []u8, value: u32 };
+
+const Flags = packed union {
+    value: u64,
+    flags: FlagsFields,
+
+    fn hasFlag(it: Flags, flag: u64) bool {
+        return it.value & flag != 0;
+    }
+
+    fn isImplicit() bool {
+        return hasFlag(0x00000001);
+    }
+
+    // fn isImplicit() = hasFlag(0x00000001)
+    // fn isFinal = hasFlag(0x00000002)
+    // fn isPrivate = hasFlag(0x00000004)
+    // def isProtected = hasFlag(0x00000008)
+    //
+    // def isSealed = hasFlag(0x00000010)
+    // def isOverride = hasFlag(0x00000020)
+    // def isCase = hasFlag(0x00000040)
+    // def isAbstract = hasFlag(0x00000080)
+    //
+    // def isDeferred = hasFlag(0x00000100)
+    // def isMethod = hasFlag(0x00000200)
+    // def isModule = hasFlag(0x00000400)
+    // def isInterface = hasFlag(0x00000800)
+    //
+    // def isMutable = hasFlag(0x00001000)
+    // def isParam = hasFlag(0x00002000)
+    // def isPackage = hasFlag(0x00004000)
+    // def isDeprecated = hasFlag(0x00008000)
+    //
+    // def isCovariant = hasFlag(0x00010000)
+    // def isCaptured = hasFlag(0x00010000)
+    //
+    // def isByNameParam = hasFlag(0x00010000)
+    // def isContravariant = hasFlag(0x00020000)
+    // def isLabel = hasFlag(0x00020000) // method symbol is a label. Set by TailCall
+    // def isInConstructor = hasFlag(0x00020000) // class symbol is defined in this/superclass constructor
+    //
+    // def isAbstractOverride = hasFlag(0x00040000)
+    // def isLocal = hasFlag(0x00080000)
+    //
+    // def isJava = hasFlag(0x00100000)
+    // def isSynthetic = hasFlag(0x00200000)
+    // def isStable = hasFlag(0x00400000)
+    // def isStatic = hasFlag(0x00800000)
+    //
+    // def isCaseAccessor = hasFlag(0x01000000)
+    // def isTrait = hasFlag(0x02000000)
+    // def isBridge = hasFlag(0x04000000)
+    // def isAccessor = hasFlag(0x08000000)
+    //
+    // def isSuperAccessor = hasFlag(0x10000000)
+    // def isParamAccessor = hasFlag(0x20000000)
+    //
+    // def isModuleVar = hasFlag(0x40000000) // for variables: is the variable caching a module value
+    // def isMonomorphic = hasFlag(0x40000000) // for type symbols: does not have type parameters
+    // def isLazy = hasFlag(0x80000000L) // symbol is a lazy val. can't have MUTABLE unless transformed by typer
+    //
+    // def isError = hasFlag(0x100000000L)
+    // def isOverloaded = hasFlag(0x200000000L)
+    // def isLifted = hasFlag(0x400000000L)
+    //
+    // def isMixedIn = hasFlag(0x800000000L)
+    // def isExistential = hasFlag(0x800000000L)
+    //
+    // def isExpandedName = hasFlag(0x1000000000L)
+    // def isImplementationClass = hasFlag(0x2000000000L)
+    // def isPreSuper = hasFlag(0x2000000000L)
+};
+
+const FlagsFields = packed struct {
+    implicit: bool = false,
+    final: bool = false,
+    private: bool = false,
+    protected: bool = false,
+
+    sealed: bool = false,
+    override: bool = false,
+    case: bool = false,
+    abstract: bool = false,
+
+    deferred: bool = false,
+    method: bool = false,
+    module: bool = false,
+    interface: bool = false,
+
+    mutable: bool = false,
+    param: bool = false,
+    package: bool = false,
+    deprecated: bool = false,
+
+    covariant: bool = false,
+    contravariant: bool = false,
+    abstract_override: bool = false,
+    local: bool = false,
+
+    java: bool = false,
+    synthetic: bool = false,
+    stable: bool = false,
+    static: bool = false,
+
+    case_accessor: bool = false,
+    trait: bool = false,
+    bridge: bool = false,
+    accessor: bool = false,
+
+    super_accessor: bool = false,
+    param_accessor: bool = false,
+    module_var: bool = false,
+    lazy: bool = false,
+
+    is_error: bool = false,
+    overloaded: bool = false,
+    lifted: bool = false,
+    mixed_in: bool = false,
+
+    expanded_name: bool = false,
+    implementation_class: bool = false,
+
+    fn debug(it: FlagsFields) void {
+        std.debug.print("flags = [", .{});
+        var i: usize = 0;
+        inline for (@typeInfo(FlagsFields).Struct.fields) |field| {
+            if (@field(it, field.name)) {
+                if (i > 0) {
+                    std.debug.print(", ", .{});
+                }
+                std.debug.print("{s}", .{field.name});
+                i += 1;
+            }
+        }
+        std.debug.print("]\n", .{});
+    }
+};
+
 const SymbolTable = struct {
     major_version: u32,
     minor_version: u32,
@@ -708,7 +925,7 @@ const SymbolTable = struct {
             const offset = try stream.getPos();
 
             const header_byte = try reader.readByte();
-            std.debug.print("header_type = {}\n", .{header_byte});
+            std.debug.print("header_byte = {}\n", .{header_byte});
             symbol_table.headers[i].header_type = @enumFromInt(header_byte);
             symbol_table.headers[i].size = try readVar(u32, reader);
             symbol_table.headers[i].offset = offset;
@@ -766,6 +983,14 @@ const SymbolTable = struct {
         return table.h[index].type_name.name;
     }
 
+    fn lookupName(table: SymbolTable, index: u32) []u8 {
+        return switch (table.h[index]) {
+            .term_name => |term_name| term_name.name,
+            .type_name => |term_name| term_name.name,
+            else => unreachable,
+        };
+    }
+
     fn print(table: SymbolTable) !void {
         const stdout = std.io.getStdOut();
         const writer = stdout.writer();
@@ -794,20 +1019,26 @@ const SymbolTable = struct {
 
         const class_info = table.h[class_info_index].class_info_type;
 
-        for (class_info.type_refs, 0..) |type_ref, i| {
+        var i: usize = 0;
+        var iter = class_info.type_refs.iterator();
+        while (iter.next()) |type_ref| {
             if (i == 0) {
                 try writer.print(" extends ", .{});
             } else if (i == 1) {
                 try writer.print(" with ", .{});
             }
             try table.printType(writer, table.h[type_ref]);
+            i += 1;
         }
         try writer.print(" {{\n", .{});
 
-        for (table.h) |h| {
+        for (table.h, 0..) |h, j| {
             switch (h) {
                 .method_symbol => |method_symbol| {
                     if (method_symbol.symbol.symbol == class_index) {
+                        std.debug.print("printMethod({})\n", .{j});
+                        method_symbol.symbol.flags.flags.debug();
+                        //std.debug.print("flags = {}\n", .{method_symbol.symbol.flags.flags});
                         try table.printMethod(writer, h);
                     }
                 },
@@ -824,6 +1055,10 @@ const SymbolTable = struct {
                 try table.printType(writer, table.h[type_ref_type.type_ref]);
                 try writer.print(".", .{});
                 try table.printType(writer, table.h[type_ref_type.symbol_ref]);
+
+                if (type_ref_type.type_args.len > 0) {
+                    std.debug.print("ASD", .{});
+                }
             },
             .this_type => |this_type| {
                 try table.printType(writer, table.h[this_type.symbol]);
@@ -836,6 +1071,10 @@ const SymbolTable = struct {
             },
             .type_name => |type_name| {
                 try writer.print("{s}", .{type_name.name});
+            },
+            .single_type => |single_type| {
+                try writer.print("single_type = {}\n", .{single_type});
+                //try writer.print("single_type = {s}\n", .{table.h[single_type.symbol_ref].term_name.name});
             },
             else => {
                 std.debug.print("h => {}\n", .{h});
@@ -853,9 +1092,18 @@ const SymbolTable = struct {
 
                 const scala_name = if (is_constructor) "this" else name;
 
-                try writer.print("  def {s}", .{scala_name});
+                if (method_symbol.symbol.flags.flags.private) {
+                    return;
+                }
 
                 std.debug.print("method_name: {s}\n", .{scala_name});
+                //std.debug.print("flags: {}\n", .{method_symbol.symbol.flags.flags});
+
+                if (method_symbol.symbol.flags.flags.accessor) {
+                    try writer.print("  val {s}", .{scala_name});
+                } else {
+                    try writer.print("  def {s}", .{scala_name});
+                }
 
                 switch (table.h[method_symbol.symbol.info]) {
                     .method_type => |method_type| {
@@ -878,6 +1126,18 @@ const SymbolTable = struct {
                         try writer.print(": ", .{});
                         try table.printMethodReturnType(writer, table.h[nullary_method_type.result_type]);
                         try writer.print("\n", .{});
+                    },
+                    .refined_type => |refined_type| {
+                        _ = refined_type;
+                        try table.printMethodReturnType(writer, h);
+
+                        //try writer.print("refined_type = {}\n", .{refined_type});
+                        //unreachable;
+                        //try table.printType(writer, );
+                    },
+                    .single_type => |single_type| {
+                        //try writer.print("single_type = {}\n", .{single_type});
+                        try table.printType(writer, table.h[single_type.type_ref]);
                     },
                     else => {
                         std.debug.print("\n{}\n", .{table.h[method_symbol.symbol.info]});
@@ -923,29 +1183,73 @@ const SymbolTable = struct {
                 if (ext_ref.symbol) |symbol| {
                     try table.printMethodReturnType(writer, table.h[symbol]);
                 }
-                const term_name = table.lookupTypeName(ext_ref.name);
+                const term_name = table.lookupName(ext_ref.name);
                 try writer.print("{s}", .{term_name});
             },
             .single_type => |single_type| {
-                _ = single_type;
+                //_ = single_type;
                 //try table.printMethodReturnType(writer, table.h[single_type.type_ref]);
                 //try writer.print("{s}", .{single_type.type_ref});
+                //unreachable;
+                try table.printMethodReturnType(writer, table.h[single_type.symbol_ref]);
+            },
+            .refined_type => |refined_type| {
+                var iter = refined_type.type_refs.iterator();
+                var i: usize = 0;
+                while (iter.next()) |type_ref| {
+                    if (i > 0) {
+                        try writer.print(" with ", .{});
+                    }
+                    try table.printMethodType(writer, table.h[type_ref]);
+                    i += 1;
+                }
             },
             //.single_type => |single_type| {
             //std.debug.print("\nunreachable => {}\n", .{single_type});
             //},
             else => {
-                std.debug.print("\nunreachable => {}\n", .{h});
+                switch (h) {
+                    .method_symbol => {
+                        std.debug.print("\nunreachable => {X}\n", .{h.method_symbol.symbol.flags.value});
+                        std.debug.print("\nunreachable => {}\n", .{h.method_symbol.symbol.flags.flags});
+                    },
+                    else => {
+                        std.debug.print("\nunreachable => {}\n", .{h});
+                    },
+                }
+
                 unreachable;
             },
         }
     }
 
-    fn printMethodType(table: SymbolTable, writer: anytype, h: Header) !void {
+    const WriterError = error{
+        AccessDenied,
+        InputOutput,
+        FileTooBig,
+        SystemResources,
+        NoSpaceLeft,
+        DeviceBusy,
+        Unexpected,
+        WouldBlock,
+        OperationAborted,
+        BrokenPipe,
+        ConnectionResetByPeer,
+        DiskQuota,
+        InvalidArgument,
+        NotOpenForWriting,
+        LockViolation,
+    };
+
+    fn printMethodType(table: SymbolTable, writer: anytype, h: Header) WriterError!void {
         switch (h) {
             .type_ref_type => |type_ref_type| {
                 try table.printMethodType(writer, table.h[type_ref_type.type_ref]);
                 try table.printMethodType(writer, table.h[type_ref_type.symbol_ref]);
+
+                if (type_ref_type.type_args.len > 0) {
+                    std.debug.print("ASD", .{});
+                }
             },
             .this_type => |this_type| {
                 try table.printMethodReturnType(writer, table.h[this_type.symbol]);
@@ -1036,4 +1340,20 @@ fn maxTagNameLength(e: anytype) u32 {
         }
     }
     return max_length;
+}
+
+const expect = std.testing.expect;
+
+test "RefIterator iterates over packed refs" {
+    var i: TypeRefs.Iterator = .{ .pos = 0, .refs = &[_]u8{ 115, 129, 60 } };
+
+    try expect(i.pos == 0);
+
+    try expect(i.next() == 115);
+    try expect(i.pos == 1);
+
+    try expect(i.next() == 188);
+    try expect(i.pos == 3);
+
+    try expect(i.next() == null);
 }
