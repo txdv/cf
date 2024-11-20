@@ -161,7 +161,7 @@ fn readVar(comptime t: anytype, reader: anytype) !t {
     var result: t = 0;
 
     while (true) {
-        const b: u8 = reader.readByte();
+        const b: u8 = try reader.readByte();
         result |= (@as(t, b) & 0x7f);
         if ((b & 0x80) != 0x80) break;
         result = result << 7;
@@ -1039,7 +1039,7 @@ const SymbolTable = struct {
                         std.debug.print("printMethod({})\n", .{j});
                         method_symbol.symbol.flags.flags.debug();
                         //std.debug.print("flags = {}\n", .{method_symbol.symbol.flags.flags});
-                        try table.printMethod(writer, h);
+                        try table.printMethod(writer, @truncate(j));
                     }
                 },
                 else => {},
@@ -1083,7 +1083,8 @@ const SymbolTable = struct {
         }
     }
 
-    fn printMethod(table: SymbolTable, writer: anytype, h: Header) !void {
+    fn printMethod(table: SymbolTable, writer: anytype, index: u32) !void {
+        const h = table.h[index];
         switch (h) {
             .method_symbol => |method_symbol| {
                 const name = table.lookupTermName(method_symbol.symbol.name);
@@ -1114,22 +1115,20 @@ const SymbolTable = struct {
                         }
                         try writer.print(")", .{});
 
-                        const return_type = table.h[method_type.result_type];
-
                         if (!is_constructor) {
                             try writer.print(": ", .{});
-                            try table.printMethodReturnType(writer, return_type);
+                            try table.printMethodReturnType(writer, method_type.result_type);
                         }
                         try writer.print(" = {{ /* compiled code */ }}\n", .{});
                     },
                     .nullary_method_type => |nullary_method_type| {
                         try writer.print(": ", .{});
-                        try table.printMethodReturnType(writer, table.h[nullary_method_type.result_type]);
+                        try table.printMethodReturnType(writer, nullary_method_type.result_type);
                         try writer.print("\n", .{});
                     },
                     .refined_type => |refined_type| {
                         _ = refined_type;
-                        try table.printMethodReturnType(writer, h);
+                        try table.printMethodReturnType(writer, index);
 
                         //try writer.print("refined_type = {}\n", .{refined_type});
                         //unreachable;
@@ -1149,11 +1148,12 @@ const SymbolTable = struct {
         }
     }
 
-    fn printMethodReturnType(table: SymbolTable, writer: anytype, h: Header) !void {
+    fn printMethodReturnType(table: SymbolTable, writer: anytype, index: u32) !void {
+        const h = table.h[index];
         std.debug.print("==> {}\n", .{h});
         switch (h) {
             .type_ref_type => |type_ref_type| {
-                try table.printMethodReturnType(writer, table.h[type_ref_type.symbol_ref]);
+                try table.printMethodReturnType(writer, type_ref_type.symbol_ref);
 
                 if (type_ref_type.type_args.len > 0) {
                     try writer.print("[", .{});
@@ -1163,17 +1163,17 @@ const SymbolTable = struct {
                             try writer.print(", ", .{});
                         }
 
-                        try table.printMethodReturnType(writer, table.h[type_arg]);
+                        try table.printMethodReturnType(writer, type_arg);
                     }
                     try writer.print("]", .{});
                 }
             },
             .this_type => |this_type| {
-                try table.printMethodReturnType(writer, table.h[this_type.symbol]);
+                try table.printMethodReturnType(writer, this_type.symbol);
             },
             .ext_mod_class_ref => |ext_mod_class_ref| {
                 if (ext_mod_class_ref.symbol) |symbol| {
-                    try table.printMethodReturnType(writer, table.h[symbol]);
+                    try table.printMethodReturnType(writer, symbol);
                 } else {
                     const term_name = table.lookupTermName(ext_mod_class_ref.name);
                     try writer.print("{s}.", .{term_name});
@@ -1181,7 +1181,7 @@ const SymbolTable = struct {
             },
             .ext_ref => |ext_ref| {
                 if (ext_ref.symbol) |symbol| {
-                    try table.printMethodReturnType(writer, table.h[symbol]);
+                    try table.printMethodReturnType(writer, symbol);
                 }
                 const term_name = table.lookupName(ext_ref.name);
                 try writer.print("{s}", .{term_name});
@@ -1191,8 +1191,11 @@ const SymbolTable = struct {
                 //try table.printMethodReturnType(writer, table.h[single_type.type_ref]);
                 //try writer.print("{s}", .{single_type.type_ref});
                 //unreachable;
-                try table.printMethodReturnType(writer, table.h[single_type.symbol_ref]);
+                try table.printMethodReturnType(writer, single_type.symbol_ref);
             },
+            //.class_symbol => |class_symbol| {
+            //    try table.printMethodReturnType(writer, table.h[class_symbol.symbol.name]);
+            //},
             .refined_type => |refined_type| {
                 var iter = refined_type.type_refs.iterator();
                 var i: usize = 0;
@@ -1204,9 +1207,6 @@ const SymbolTable = struct {
                     i += 1;
                 }
             },
-            //.single_type => |single_type| {
-            //std.debug.print("\nunreachable => {}\n", .{single_type});
-            //},
             else => {
                 switch (h) {
                     .method_symbol => {
@@ -1252,7 +1252,7 @@ const SymbolTable = struct {
                 }
             },
             .this_type => |this_type| {
-                try table.printMethodReturnType(writer, table.h[this_type.symbol]);
+                try table.printMethodReturnType(writer, this_type.symbol);
             },
             .ext_mod_class_ref => |ext_mod_class_ref| {
                 if (ext_mod_class_ref.symbol) |symbol| {
