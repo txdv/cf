@@ -612,7 +612,7 @@ const RefinedType = struct {
     fn read(data: []u8) !RefinedType {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader();
-        return RefinedType{
+        return .{
             .class_sym = try readVar(u32, reader),
             .type_refs = .{ .refs = data[try stream.getPos()..] },
         };
@@ -624,9 +624,16 @@ const AnnotatedType = struct {};
 const AnnotatedWithSelfType = struct {};
 
 const ExistentialType = struct {
-    fn read(data: []u8) ExistentialType {
-        _ = data;
-        return .{};
+    type_ref: u32,
+    symbol_refs: []u8,
+
+    fn read(data: []u8) !ExistentialType {
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+        return .{
+            .type_ref = try readVar(u32, reader),
+            .symbol_refs = data[try stream.getPos()..],
+        };
     }
 };
 
@@ -723,7 +730,7 @@ const SymbolHeader = struct {
             .constant_long => .{ .constant_long = readVarData(u64, data) },
             .constant_bool => .{ .constant_bool = data[0] != 0 },
 
-            .existential_type => .{ .existential_type = ExistentialType.read(data) },
+            .existential_type => .{ .existential_type = try ExistentialType.read(data) },
 
             .constant_type => .{ .constant_type = try ConstantType.read(data) },
 
@@ -1070,6 +1077,12 @@ const SymbolTable = struct {
         // h: Header
         const h = table.h[index];
         switch (h) {
+            .existential_type => |existential_type| {
+                try table.printType(writer, existential_type.type_ref);
+            },
+            .class_symbol => |class_symbol| {
+                try writer.print("{s}", .{table.lookupName(class_symbol.symbol.name)});
+            },
             .type_symbol => |type_symbol| {
                 try writer.print("{s}", .{table.lookupName(type_symbol.symbol.name)});
             },
@@ -1079,7 +1092,14 @@ const SymbolTable = struct {
                 try table.printType(writer, type_ref_type.symbol_ref);
 
                 if (type_ref_type.type_args.len > 0) {
-                    std.debug.print("ASD", .{});
+                    try writer.print("[", .{});
+
+                    var iter = PackedIterator.init(type_ref_type.type_args);
+                    while (iter.next()) |arg| {
+                        try table.printType(writer, arg);
+                    }
+
+                    try writer.print("]", .{});
                 }
             },
             .this_type => |this_type| {
@@ -1108,6 +1128,9 @@ const SymbolTable = struct {
                 try table.printType(writer, object_symbol.symbol.name);
                 //std.debug.print("object_symbol => {}\n", .{object_symbol});
                 //unreachable;
+            },
+            .no_prefix_type => {
+                // do nothing?
             },
             else => {
                 std.debug.print("h => {}\n", .{h});
@@ -1195,8 +1218,13 @@ const SymbolTable = struct {
                 try writer.print("(", .{});
 
                 var iter = PackedIterator.init(method_type.param_symbols);
+                var i: usize = 0;
                 while (iter.next()) |param_symbol| {
+                    if (i > 0) {
+                        try writer.print(", ", .{});
+                    }
                     try table.printMethodArg(writer, param_symbol);
+                    i += 1;
                 }
                 try writer.print(")", .{});
 
@@ -1347,41 +1375,7 @@ const SymbolTable = struct {
             .method_symbol => |method_symbol| {
                 const argName = table.lookupTermName(method_symbol.symbol.name);
                 try writer.print("{s}: ", .{argName});
-                try table.printMethodArg(writer, method_symbol.symbol.info);
-            },
-            .type_ref_type => |type_ref_type| {
-                try table.printMethodArg(writer, type_ref_type.type_ref);
-                try table.printMethodArg(writer, type_ref_type.symbol_ref);
-
-                if (type_ref_type.type_args.len > 0) {
-                    try writer.print("[", .{});
-
-                    for (type_ref_type.type_args) |arg| {
-                        try table.printMethodType(writer, table.h[arg]);
-                        //try writer.print("{}", .{arg});
-                    }
-
-                    try writer.print("]", .{});
-                }
-            },
-            .this_type => |this_type| {
-                try table.printMethodArg(writer, this_type.symbol);
-            },
-            .single_type => {
-                //try table.printMethodArg(writer, single_type.type_ref);
-                //try table.printMethodArg(writer, single_type.symbol_ref);
-                try table.printType(writer, index);
-            },
-            .ext_mod_class_ref => |ext_mod_class_ref| {
-                const term_name = table.lookupTermName(ext_mod_class_ref.name);
-                try writer.print("{s}.", .{term_name});
-            },
-            .ext_ref => |ext_ref| {
-                const term_name = table.lookupTypeName(ext_ref.name);
-                try writer.print("{s}", .{term_name});
-            },
-            .type_name => |type_name| {
-                std.debug.print("debug = {s}\n", .{type_name.name});
+                try table.printType(writer, method_symbol.symbol.info);
             },
             else => {
                 std.debug.print("debug = {}\n", .{h});
