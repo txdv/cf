@@ -257,34 +257,41 @@ const NullaryMethodType = struct {
     }
 };
 
+const PackedIterator = struct {
+    pos: usize,
+    refs: []const u8,
+
+    fn next(it: *PackedIterator) ?u32 {
+        if (it.pos >= it.refs.len) {
+            return null;
+        }
+
+        var result: u32 = 0;
+
+        while (it.pos < it.refs.len) {
+            const b: u8 = it.refs[it.pos];
+            it.pos += 1;
+
+            result |= (@as(u32, b) & 0x7f);
+            if ((b & 0x80) != 0x80) break;
+            result = result << 7;
+        }
+
+        return result;
+    }
+
+    fn init(refs: []u8) PackedIterator {
+        return PackedIterator{
+            .pos = 0,
+            .refs = refs,
+        };
+    }
+};
+
 const TypeRefs = struct {
     refs: []u8,
 
-    const Iterator = struct {
-        pos: usize,
-        refs: []const u8,
-
-        fn next(it: *Iterator) ?u32 {
-            if (it.pos >= it.refs.len) {
-                return null;
-            }
-
-            var result: u32 = 0;
-
-            while (it.pos < it.refs.len) {
-                const b: u8 = it.refs[it.pos];
-                it.pos += 1;
-
-                result |= (@as(u32, b) & 0x7f);
-                if ((b & 0x80) != 0x80) break;
-                result = result << 7;
-            }
-
-            return result;
-        }
-    };
-
-    fn iterator(self: TypeRefs) Iterator {
+    fn iterator(self: TypeRefs) PackedIterator {
         return .{ .pos = 0, .refs = self.refs };
     }
 };
@@ -360,6 +367,10 @@ const TypeRefType = struct {
             .symbol_ref = try readVar(u32, reader),
             .type_args = data[try stream.getPos()..],
         };
+    }
+
+    fn iterator(self: TypeRefType) PackedIterator {
+        return .{ .pos = 0, .refs = self.type_args };
     }
 };
 
@@ -504,9 +515,15 @@ const TypeName = struct {
 const NoSymbol = struct {};
 
 const TypeSymbol = struct {
+    symbol: SymbolInfo,
+
     fn read(data: []u8) !TypeSymbol {
-        _ = data;
-        return TypeSymbol{};
+        var stream = std.io.fixedBufferStream(data);
+        const reader = stream.reader();
+
+        return .{
+            .symbol = try SymbolInfo.read2(reader),
+        };
     }
 };
 
@@ -1027,7 +1044,7 @@ const SymbolTable = struct {
             } else if (i == 1) {
                 try writer.print(" with ", .{});
             }
-            try table.printType(writer, table.h[type_ref]);
+            try table.printType(writer, type_ref);
             i += 1;
         }
         try writer.print(" {{\n", .{});
@@ -1049,32 +1066,48 @@ const SymbolTable = struct {
         try writer.print("}}\n", .{});
     }
 
-    fn printType(table: SymbolTable, writer: anytype, h: Header) !void {
+    fn printType(table: SymbolTable, writer: anytype, index: u32) !void {
+        // h: Header
+        const h = table.h[index];
         switch (h) {
+            .type_symbol => |type_symbol| {
+                try writer.print("{s}", .{table.lookupName(type_symbol.symbol.name)});
+            },
             .type_ref_type => |type_ref_type| {
-                try table.printType(writer, table.h[type_ref_type.type_ref]);
+                try table.printType(writer, type_ref_type.type_ref);
                 try writer.print(".", .{});
-                try table.printType(writer, table.h[type_ref_type.symbol_ref]);
+                try table.printType(writer, type_ref_type.symbol_ref);
 
                 if (type_ref_type.type_args.len > 0) {
                     std.debug.print("ASD", .{});
                 }
             },
             .this_type => |this_type| {
-                try table.printType(writer, table.h[this_type.symbol]);
+                try table.printType(writer, this_type.symbol);
             },
             .ext_mod_class_ref => |ext_mod_class_ref| {
                 try writer.print("{s}", .{table.h[ext_mod_class_ref.name].term_name.name});
             },
             .ext_ref => |ext_ref| {
-                try table.printType(writer, table.h[ext_ref.name]);
+                try table.printType(writer, ext_ref.name);
             },
             .type_name => |type_name| {
                 try writer.print("{s}", .{type_name.name});
             },
+            .term_name => |term_name| {
+                try writer.print("{s}", .{term_name.name});
+            },
             .single_type => |single_type| {
-                try writer.print("single_type = {}\n", .{single_type});
+                //try writer.print("single_type = {}\n", .{single_type});
                 //try writer.print("single_type = {s}\n", .{table.h[single_type.symbol_ref].term_name.name});
+                //try writer.print(.{single_type.symbol_ref});
+                try table.printType(writer, single_type.symbol_ref);
+            },
+            .object_symbol => |object_symbol| {
+                try table.printType(writer, object_symbol.symbol.symbol);
+                try table.printType(writer, object_symbol.symbol.name);
+                //std.debug.print("object_symbol => {}\n", .{object_symbol});
+                //unreachable;
             },
             else => {
                 std.debug.print("h => {}\n", .{h});
@@ -1110,8 +1143,14 @@ const SymbolTable = struct {
                     .method_type => |method_type| {
                         try writer.print("(", .{});
 
-                        for (method_type.param_symbols) |param_symbol| {
-                            try table.printMethodArg(writer, table.h[param_symbol]);
+                        var iter = PackedIterator.init(method_type.param_symbols);
+                        var i: usize = 0;
+                        while (iter.next()) |param_symbol| {
+                            if (i > 0) {
+                                try writer.print(", ", .{});
+                            }
+                            try table.printMethodArg(writer, param_symbol);
+                            i += 1;
                         }
                         try writer.print(")", .{});
 
@@ -1136,7 +1175,7 @@ const SymbolTable = struct {
                     },
                     .single_type => |single_type| {
                         //try writer.print("single_type = {}\n", .{single_type});
-                        try table.printType(writer, table.h[single_type.type_ref]);
+                        try table.printType(writer, single_type.type_ref);
                     },
                     else => {
                         std.debug.print("\n{}\n", .{table.h[method_symbol.symbol.info]});
@@ -1150,20 +1189,38 @@ const SymbolTable = struct {
 
     fn printMethodReturnType(table: SymbolTable, writer: anytype, index: u32) !void {
         const h = table.h[index];
-        std.debug.print("==> {}\n", .{h});
+        std.debug.print("==> ({}) {}\n", .{ index, h });
         switch (h) {
+            .method_type => |method_type| {
+                try writer.print("(", .{});
+
+                var iter = PackedIterator.init(method_type.param_symbols);
+                while (iter.next()) |param_symbol| {
+                    try table.printMethodArg(writer, param_symbol);
+                }
+                try writer.print(")", .{});
+
+                try writer.print(": ", .{});
+                try table.printMethodReturnType(writer, method_type.result_type);
+            },
+            .type_name => |type_name| {
+                try writer.print("{s}", .{type_name.name});
+            },
             .type_ref_type => |type_ref_type| {
                 try table.printMethodReturnType(writer, type_ref_type.symbol_ref);
 
                 if (type_ref_type.type_args.len > 0) {
                     try writer.print("[", .{});
 
-                    for (type_ref_type.type_args, 0..) |type_arg, i| {
+                    var i: usize = 0;
+                    var iter = type_ref_type.iterator();
+                    while (iter.next()) |type_arg| {
                         if (i > 0) {
                             try writer.print(", ", .{});
                         }
 
                         try table.printMethodReturnType(writer, type_arg);
+                        i += 1;
                     }
                     try writer.print("]", .{});
                 }
@@ -1193,9 +1250,15 @@ const SymbolTable = struct {
                 //unreachable;
                 try table.printMethodReturnType(writer, single_type.symbol_ref);
             },
-            //.class_symbol => |class_symbol| {
-            //    try table.printMethodReturnType(writer, table.h[class_symbol.symbol.name]);
-            //},
+            .class_symbol => |class_symbol| {
+                try table.printMethodReturnType(writer, class_symbol.symbol.symbol);
+                const name = table.lookupName(class_symbol.symbol.name);
+                try writer.print("{s}", .{name});
+                //std.debug.print("NAME = {s}\n", .{name});
+                //try table.printMethodReturnType(writer, class_symbol.symbol.info);
+                std.debug.print("class_symbol = {}\n", .{class_symbol});
+                //try table.printMethodReturnType(writer, table.h[class_symbol.symbol.name]);
+            },
             .refined_type => |refined_type| {
                 var iter = refined_type.type_refs.iterator();
                 var i: usize = 0;
@@ -1207,11 +1270,14 @@ const SymbolTable = struct {
                     i += 1;
                 }
             },
+            .type_symbol => {
+                try table.printType(writer, index);
+            },
             else => {
                 switch (h) {
                     .method_symbol => {
                         std.debug.print("\nunreachable => {X}\n", .{h.method_symbol.symbol.flags.value});
-                        std.debug.print("\nunreachable => {}\n", .{h.method_symbol.symbol.flags.flags});
+                        h.method_symbol.symbol.flags.flags.debug();
                     },
                     else => {
                         std.debug.print("\nunreachable => {}\n", .{h});
@@ -1274,16 +1340,18 @@ const SymbolTable = struct {
         }
     }
 
-    fn printMethodArg(table: SymbolTable, writer: anytype, h: Header) !void {
+    fn printMethodArg(table: SymbolTable, writer: anytype, index: u32) !void {
+        const h = table.h[index];
+        std.debug.print("printMethodArg({}) = {}\n", .{ index, h });
         switch (h) {
             .method_symbol => |method_symbol| {
                 const argName = table.lookupTermName(method_symbol.symbol.name);
                 try writer.print("{s}: ", .{argName});
-                try table.printMethodArg(writer, table.h[method_symbol.symbol.info]);
+                try table.printMethodArg(writer, method_symbol.symbol.info);
             },
             .type_ref_type => |type_ref_type| {
-                try table.printMethodArg(writer, table.h[type_ref_type.type_ref]);
-                try table.printMethodArg(writer, table.h[type_ref_type.symbol_ref]);
+                try table.printMethodArg(writer, type_ref_type.type_ref);
+                try table.printMethodArg(writer, type_ref_type.symbol_ref);
 
                 if (type_ref_type.type_args.len > 0) {
                     try writer.print("[", .{});
@@ -1297,7 +1365,12 @@ const SymbolTable = struct {
                 }
             },
             .this_type => |this_type| {
-                try table.printMethodArg(writer, table.h[this_type.symbol]);
+                try table.printMethodArg(writer, this_type.symbol);
+            },
+            .single_type => {
+                //try table.printMethodArg(writer, single_type.type_ref);
+                //try table.printMethodArg(writer, single_type.symbol_ref);
+                try table.printType(writer, index);
             },
             .ext_mod_class_ref => |ext_mod_class_ref| {
                 const term_name = table.lookupTermName(ext_mod_class_ref.name);
@@ -1306,6 +1379,9 @@ const SymbolTable = struct {
             .ext_ref => |ext_ref| {
                 const term_name = table.lookupTypeName(ext_ref.name);
                 try writer.print("{s}", .{term_name});
+            },
+            .type_name => |type_name| {
+                std.debug.print("debug = {s}\n", .{type_name.name});
             },
             else => {
                 std.debug.print("debug = {}\n", .{h});
