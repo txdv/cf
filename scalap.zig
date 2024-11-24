@@ -1008,10 +1008,18 @@ const SymbolTable = struct {
     }
 
     fn lookupName(table: SymbolTable, index: u32) []u8 {
-        return switch (table.h[index]) {
+        const h = table.h[index];
+        return switch (h) {
             .term_name => |term_name| term_name.name,
             .type_name => |term_name| term_name.name,
-            else => unreachable,
+            .this_type => |this_type| table.lookupName(this_type.symbol),
+            .ext_mod_class_ref => |ext_mod_class_ref| table.lookupName(ext_mod_class_ref.name),
+            .single_type => |single_type| table.lookupName(single_type.type_ref),
+            .type_ref_type => |type_ref_type| table.lookupName(type_ref_type.type_ref),
+            else => {
+                std.debug.print("lookupName({}) = {}\n", .{ index, h });
+                unreachable;
+            },
         };
     }
 
@@ -1097,19 +1105,24 @@ const SymbolTable = struct {
                 try table.printType(writer, object_symbol.symbol.symbol);
                 try table.printType(writer, object_symbol.symbol.name);
             },
-            // .method_symbol
+            .method_symbol => |method_symbol| {
+                const argName = table.lookupTermName(method_symbol.symbol.name);
+                try writer.print("{s}: ", .{argName});
+                try table.printType(writer, method_symbol.symbol.info);
+            },
             .ext_ref => |ext_ref| {
-                // if (ext_ref.symbol) |symbol| {
-                //     try table.printType(writer, symbol);
-                // }
+                if (ext_ref.symbol) |symbol| {
+                    try table.printType(writer, symbol);
+                    try writer.print(".", .{});
+                }
                 try table.printType(writer, ext_ref.name);
             },
             .ext_mod_class_ref => |ext_mod_class_ref| {
                 if (ext_mod_class_ref.symbol) |symbol| {
                     try table.printType(writer, symbol);
-                } else {
-                    try writer.print("{s}", .{table.h[ext_mod_class_ref.name].term_name.name});
+                    try writer.print(".", .{});
                 }
+                try writer.print("{s}", .{table.h[ext_mod_class_ref.name].term_name.name});
             },
             // .no_type
             // .no_prefix_type
@@ -1121,8 +1134,12 @@ const SymbolTable = struct {
             },
             // .constant_type
             .type_ref_type => |type_ref_type| {
-                try table.printType(writer, type_ref_type.type_ref);
-                try writer.print(".", .{});
+                // const type_ref_name = table.lookupName(type_ref_type.type_ref);
+                // std.debug.print("type_ref_name = {s}\n", .{type_ref_name});
+                // if (!std.mem.eql(u8, type_ref_name, "scala")) {
+                //     try table.printType(writer, type_ref_type.type_ref);
+                //     try writer.print(".", .{});
+                // }
                 try table.printType(writer, type_ref_type.symbol_ref);
 
                 if (type_ref_type.type_args.len > 0) {
@@ -1164,7 +1181,7 @@ const SymbolTable = struct {
                     if (i > 0) {
                         try writer.print(", ", .{});
                     }
-                    try table.printMethodArg(writer, param_symbol);
+                    try table.printType(writer, param_symbol);
                     i += 1;
                 }
                 try writer.print(")", .{});
@@ -1226,7 +1243,7 @@ const SymbolTable = struct {
                             if (i > 0) {
                                 try writer.print(", ", .{});
                             }
-                            try table.printMethodArg(writer, param_symbol);
+                            try table.printType(writer, param_symbol);
                             i += 1;
                         }
                         try writer.print(")", .{});
@@ -1281,55 +1298,6 @@ const SymbolTable = struct {
         NotOpenForWriting,
         LockViolation,
     };
-
-    fn printMethodType(table: SymbolTable, writer: anytype, h: Header) WriterError!void {
-        switch (h) {
-            .type_ref_type => |type_ref_type| {
-                try table.printMethodType(writer, table.h[type_ref_type.type_ref]);
-                try table.printMethodType(writer, table.h[type_ref_type.symbol_ref]);
-
-                if (type_ref_type.type_args.len > 0) {
-                    std.debug.print("ASD", .{});
-                }
-            },
-            .this_type => |this_type| {
-                try table.printType(writer, this_type.symbol);
-            },
-            .ext_mod_class_ref => |ext_mod_class_ref| {
-                if (ext_mod_class_ref.symbol) |symbol| {
-                    try table.printMethodType(writer, table.h[symbol]);
-                }
-                const term_name = table.lookupTermName(ext_mod_class_ref.name);
-                if (!std.mem.eql(u8, term_name, "<empty>")) {
-                    try writer.print("{s}.", .{term_name});
-                }
-            },
-            .ext_ref => |ext_ref| {
-                if (ext_ref.symbol) |symbol| {
-                    try table.printMethodType(writer, table.h[symbol]);
-                }
-                const term_name = table.lookupTypeName(ext_ref.name);
-                try writer.print("{s}", .{term_name});
-            },
-            else => {},
-        }
-    }
-
-    fn printMethodArg(table: SymbolTable, writer: anytype, index: u32) !void {
-        const h = table.h[index];
-        std.debug.print("printMethodArg({}) = {}\n", .{ index, h });
-        switch (h) {
-            .method_symbol => |method_symbol| {
-                const argName = table.lookupTermName(method_symbol.symbol.name);
-                try writer.print("{s}: ", .{argName});
-                try table.printType(writer, method_symbol.symbol.info);
-            },
-            else => {
-                std.debug.print("debug = {}\n", .{h});
-                unreachable;
-            },
-        }
-    }
 
     fn findClass(table: SymbolTable, name: u32) ?struct { i: usize, class: ClassSymbol } {
         const n = table.lookupTermName(name);
