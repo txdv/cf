@@ -1077,15 +1077,42 @@ const SymbolTable = struct {
         const h = table.h[index];
         std.debug.print("printType({}) = {}\n", .{ index, h });
         switch (h) {
-            .existential_type => |existential_type| {
-                try table.printType(writer, existential_type.type_ref);
+            .term_name => |term_name| {
+                try writer.print("{s}", .{term_name.name});
             },
-            .class_symbol => |class_symbol| {
-                try writer.print("{s}", .{table.lookupName(class_symbol.symbol.name)});
+            .type_name => |type_name| {
+                try writer.print("{s}", .{type_name.name});
+            },
+            .no_prefix_type => {
+                // do nothing?
             },
             .type_symbol => |type_symbol| {
                 try writer.print("{s}", .{table.lookupName(type_symbol.symbol.name)});
             },
+            .alias_symbol => unreachable,
+            .class_symbol => |class_symbol| {
+                try writer.print("{s}", .{table.lookupName(class_symbol.symbol.name)});
+            },
+            .object_symbol => |object_symbol| {
+                try table.printType(writer, object_symbol.symbol.symbol);
+                try table.printType(writer, object_symbol.symbol.name);
+            },
+            // .method_symbol
+            .ext_ref => |ext_ref| {
+                try table.printType(writer, ext_ref.name);
+            },
+            .ext_mod_class_ref => |ext_mod_class_ref| {
+                try writer.print("{s}", .{table.h[ext_mod_class_ref.name].term_name.name});
+            },
+            // .no_type
+            // .no_prefix_type
+            .this_type => |this_type| {
+                try table.printType(writer, this_type.symbol);
+            },
+            .single_type => |single_type| {
+                try table.printType(writer, single_type.symbol_ref);
+            },
+            // .constant_type
             .type_ref_type => |type_ref_type| {
                 try table.printType(writer, type_ref_type.type_ref);
                 try writer.print(".", .{});
@@ -1102,35 +1129,19 @@ const SymbolTable = struct {
                     try writer.print("]", .{});
                 }
             },
-            .this_type => |this_type| {
-                try table.printType(writer, this_type.symbol);
-            },
-            .ext_mod_class_ref => |ext_mod_class_ref| {
-                try writer.print("{s}", .{table.h[ext_mod_class_ref.name].term_name.name});
-            },
-            .ext_ref => |ext_ref| {
-                try table.printType(writer, ext_ref.name);
-            },
-            .type_name => |type_name| {
-                try writer.print("{s}", .{type_name.name});
-            },
-            .term_name => |term_name| {
-                try writer.print("{s}", .{term_name.name});
-            },
-            .single_type => |single_type| {
-                //try writer.print("single_type = {}\n", .{single_type});
-                //try writer.print("single_type = {s}\n", .{table.h[single_type.symbol_ref].term_name.name});
-                //try writer.print(.{single_type.symbol_ref});
-                try table.printType(writer, single_type.symbol_ref);
-            },
-            .object_symbol => |object_symbol| {
-                try table.printType(writer, object_symbol.symbol.symbol);
-                try table.printType(writer, object_symbol.symbol.name);
-                //std.debug.print("object_symbol => {}\n", .{object_symbol});
-                //unreachable;
-            },
-            .no_prefix_type => {
-                // do nothing?
+            // .type_bounds_type
+            // .refined_type
+            // .class_info_Type
+            // .method_type
+            // .nullary_method_type
+            // .constant_bool
+            // .constant_long
+            // .name_ref
+            // .attribute_info
+            // .annotated_type
+            // .annotated_with_self_type
+            .existential_type => |existential_type| {
+                try table.printType(writer, existential_type.type_ref);
             },
             else => {
                 std.debug.print("h => {}\n", .{h});
