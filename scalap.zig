@@ -1099,6 +1099,8 @@ const SymbolTable = struct {
             },
             // .alias_symbol
             .class_symbol => |class_symbol| {
+                try table.printType(writer, class_symbol.symbol.symbol);
+                try writer.print(".", .{});
                 try writer.print("{s}", .{table.lookupName(class_symbol.symbol.name)});
             },
             .object_symbol => |object_symbol| {
