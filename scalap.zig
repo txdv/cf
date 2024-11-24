@@ -1074,8 +1074,8 @@ const SymbolTable = struct {
     }
 
     fn printType(table: SymbolTable, writer: anytype, index: u32) !void {
-        // h: Header
         const h = table.h[index];
+        std.debug.print("printType({}) = {}\n", .{ index, h });
         switch (h) {
             .existential_type => |existential_type| {
                 try table.printType(writer, existential_type.type_ref);
@@ -1141,6 +1141,7 @@ const SymbolTable = struct {
 
     fn printMethod(table: SymbolTable, writer: anytype, index: u32) !void {
         const h = table.h[index];
+        std.debug.print("printMethod({}) = {}\n", .{ index, h });
         switch (h) {
             .method_symbol => |method_symbol| {
                 const name = table.lookupTermName(method_symbol.symbol.name);
@@ -1162,7 +1163,10 @@ const SymbolTable = struct {
                     try writer.print("  def {s}", .{scala_name});
                 }
 
-                switch (table.h[method_symbol.symbol.info]) {
+                const method_info = table.h[method_symbol.symbol.info];
+                std.debug.print("method_info({}): {}\n", .{ method_symbol.symbol.info, method_info });
+
+                switch (method_info) {
                     .method_type => |method_type| {
                         try writer.print("(", .{});
 
