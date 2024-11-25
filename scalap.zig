@@ -244,19 +244,6 @@ const MethodType = struct {
     }
 };
 
-const NullaryMethodType = struct {
-    result_type: u32,
-
-    fn read(data: []u8) !NullaryMethodType {
-        var stream = std.io.fixedBufferStream(data);
-        const reader = stream.reader();
-
-        return NullaryMethodType{
-            .result_type = try readVar(u32, reader),
-        };
-    }
-};
-
 const PackedIterator = struct {
     pos: usize,
     refs: []const u8,
@@ -433,8 +420,8 @@ const HeaderType = enum(u8) {
     refined_type = 18,
     class_info_type = 19,
     method_type = 20,
-    //poly_type = 21, // TODO: can be poly type for old versions?
-    nullary_method_type = 21,
+    // TODO: implement polytype
+    poly_type = 21,
     //method_type2 = 22,
     constant_bool = 25,
     constant_long = 30,
@@ -466,9 +453,7 @@ const Header = union(HeaderType) {
     refined_type: RefinedType,
     class_info_type: ClassInfoType,
     method_type: MethodType,
-    //poly_type: PolyType,
-    nullary_method_type: NullaryMethodType,
-    //NullaryMethodType = 21, // overlapping?
+    poly_type: PolyType,
     //method_type2 = 22,
     constant_bool: bool,
     constant_long: u64,
@@ -483,11 +468,13 @@ const Header = union(HeaderType) {
         switch (header) {
             .term_name => |name| std.debug.print("TermName = \"{s}\"\n", .{name.name}),
             .type_name => |name| std.debug.print("TypeName = \"{s}\"\n", .{name.name}),
-            .refined_type => |refined_type| {
-                std.debug.print("{}\n", .{refined_type});
-                std.debug.print("refined_type.type_refs = {}\n", .{refined_type.type_refs});
-            },
             else => |item| std.debug.print("{}\n", .{item}),
+        }
+        switch (header) {
+            .method_symbol => |method_symbol| method_symbol.symbol.flags.debug(),
+            .type_symbol => |type_symbol| type_symbol.symbol.flags.debug(),
+            .class_symbol => |class_symbol| class_symbol.symbol.flags.debug(),
+            else => {},
         }
     }
 };
@@ -639,15 +626,18 @@ const ExistentialType = struct {
 
 const PolyType = struct {
     type_ref: u32,
-    symbols: []u8,
+    symbols: ?[]u8,
 
     fn read(data: []u8) !PolyType {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader();
 
+        const type_ref = try readVar(u32, reader);
+        const symbols: []u8 = data[try stream.getPos()..];
+
         return PolyType{
-            .type_ref = try readVar(u32, reader),
-            .symbols = data[try stream.getPos()..],
+            .type_ref = type_ref,
+            .symbols = symbols,
         };
     }
 };
@@ -722,8 +712,7 @@ const SymbolHeader = struct {
             .refined_type => .{ .refined_type = try RefinedType.read(data) },
             .class_info_type => .{ .class_info_type = try ClassInfoType.read(data) },
             .method_type => .{ .method_type = try MethodType.read(data) },
-            //.poly_type => .{ .poly_type = try PolyType.read(data) },
-            .nullary_method_type => .{ .nullary_method_type = try NullaryMethodType.read(data) },
+            .poly_type => .{ .poly_type = try PolyType.read(data) },
             .name_ref => .{ .name_ref = data[0] },
             .attribute_info => .{ .attribute_info = try AttributeInfo.read(data) },
 
@@ -741,33 +730,6 @@ const SymbolHeader = struct {
         };
     }
 };
-
-// term_name: TermName,
-// type_name: TypeName,
-// no_symbol: NoSymbol,
-// type_symbol: TypeSymbol,
-// alias_symbol: AliasSymbol,
-// class_symbol: ClassSymbol,
-// object_symbol: ObjectSymbol,
-// method_symbol: MethodSymbol,
-// ext_ref: ExtRef,
-// ext_mod_class_ref: ExtModClassRef,
-// no_type: NoType,
-// no_prefix_type: NoPrefixType,
-// this_type: ThisType,
-// single_type: SingleType,
-// constant_type: ConstantType,
-// type_ref_type: TypeRefType,
-// type_bounds_type: TypeBoundsType,
-// refined_type: RefinedType,
-// class_info_type: ClassInfoType,
-// method_type: MethodType,
-// poly_type: PolyType,
-// //NullaryMethodType = 21, // overlapping?
-// //method_type2 = 22,
-// annotated_type: AnnotatedType,
-// annotated_with_self_type: AnnotatedWithSelfType,
-// existential_type: ExistentialType,
 
 const FlagValues = .{
     .{ .name = "implicit", .value = 0x00000001 },
@@ -793,6 +755,10 @@ const Flags = packed union {
 
     fn isImplicit() bool {
         return hasFlag(0x00000001);
+    }
+
+    fn debug(it: Flags) void {
+        it.flags.debug();
     }
 
     // fn isImplicit() = hasFlag(0x00000001)
@@ -1083,7 +1049,8 @@ const SymbolTable = struct {
 
     fn printType(table: SymbolTable, writer: anytype, index: u32) WriterError!void {
         const h = table.h[index];
-        std.debug.print("printType({}) = {}\n", .{ index, h });
+        std.debug.print("printType({}) = ", .{index});
+        h.debug(&table);
         switch (h) {
             .term_name => |term_name| {
                 try writer.print("{s}", .{term_name.name});
@@ -1191,7 +1158,7 @@ const SymbolTable = struct {
                 try writer.print(": ", .{});
                 try table.printType(writer, method_type.result_type);
             },
-            // .nullary_method_type
+            // .poly_type
             // .constant_bool
             // .constant_long
             // .name_ref
@@ -1256,9 +1223,22 @@ const SymbolTable = struct {
                         }
                         try writer.print(" = {{ /* compiled code */ }}\n", .{});
                     },
-                    .nullary_method_type => |nullary_method_type| {
-                        try writer.print(": ", .{});
-                        try table.printType(writer, nullary_method_type.result_type);
+                    .poly_type => |poly_type| {
+                        if (poly_type.symbols) |symbols| {
+                            var iter = PackedIterator.init(symbols);
+                            var i: usize = 0;
+                            try writer.print("[", .{});
+                            while (iter.next()) |symbol| {
+                                if (i > 0) {
+                                    try writer.print(", ", .{});
+                                }
+
+                                try table.printType(writer, symbol);
+                                i += 1;
+                            }
+                            try writer.print("]", .{});
+                        }
+                        try table.printType(writer, poly_type.type_ref);
                         try writer.print("\n", .{});
                     },
                     .refined_type => |refined_type| {
