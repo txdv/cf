@@ -637,7 +637,7 @@ const PolyType = struct {
 
         return PolyType{
             .type_ref = type_ref,
-            .symbols = symbols,
+            .symbols = if (symbols.len == 0) null else symbols,
         };
     }
 };
@@ -1155,7 +1155,14 @@ const SymbolTable = struct {
                 }
                 try writer.print(")", .{});
 
-                try writer.print(": ", .{});
+                const method_chain = switch (table.h[method_type.result_type]) {
+                    .method_type => true,
+                    else => false,
+                };
+
+                if (!method_chain) {
+                    try writer.print(": ", .{});
+                }
                 try table.printType(writer, method_type.result_type);
             },
             // .poly_type
@@ -1180,6 +1187,8 @@ const SymbolTable = struct {
         std.debug.print("printMethod({}) = {}\n", .{ index, h });
         switch (h) {
             .method_symbol => |method_symbol| {
+                method_symbol.symbol.flags.debug();
+
                 const name = table.lookupTermName(method_symbol.symbol.name);
 
                 const is_constructor = std.mem.eql(u8, name, "<init>");
@@ -1237,6 +1246,8 @@ const SymbolTable = struct {
                                 i += 1;
                             }
                             try writer.print("]", .{});
+                        } else {
+                            try writer.print(": ", .{});
                         }
                         try table.printType(writer, poly_type.type_ref);
                         try writer.print("\n", .{});
