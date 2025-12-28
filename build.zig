@@ -71,4 +71,17 @@ pub fn build(b: *std.Build) void {
 
     const scalap_step = b.step("scalap", "Compile scalap");
     scalap_step.dependOn(&scalap.step);
+
+    const scala_tokenizer = b.addExecutable(.{
+        .name = "scala_tokenizer",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("scala/tokenizer_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(scala_tokenizer);
+
+    const scala_tokenizer_step = b.step("scala_tokenizer", "Compile scala_tokenizer");
+    scala_tokenizer_step.dependOn(&scala_tokenizer.step);
 }
