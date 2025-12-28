@@ -36,8 +36,8 @@ pub fn Serialize(comptime T: type) type {
 
             inline for (std.meta.fields(T)[1..]) |field| {
                 @field(value, field.name) = switch (@typeInfo(field.type)) {
-                    .Int => try reader.readInt(field.type, .big),
-                    .Enum => |info| @enumFromInt(try reader.readInt(info.tag_type, .big)),
+                    .int => try reader.readInt(field.type, .big),
+                    .@"enum" => |info| @enumFromInt(try reader.readInt(info.tag_type, .big)),
                     else => @compileError("Decode not implemented: " ++ @typeName(field.type)),
                 };
             }
@@ -82,7 +82,7 @@ pub fn decodeEntries(self: *ConstantPool, reader: anytype) !void {
 
 pub fn decodeEntry(self: *ConstantPool, reader: anytype) !Entry {
     const tag = try reader.readInt(u8, .big);
-    inline for (@typeInfo(Tag).Enum.fields, 0..) |f, i| {
+    inline for (@typeInfo(Tag).@"enum".fields, 0..) |f, i| {
         const this_tag_value = @field(Tag, f.name);
         if (tag == @intFromEnum(this_tag_value)) {
             const T = std.meta.fields(Entry)[i].type;

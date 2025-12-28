@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const utils = @import("utils.zig");
-const attributes = @import("attributes.zig");
+const attr = @import("attributes.zig");
 const FieldInfo = @import("FieldInfo.zig");
 const MethodInfo = @import("MethodInfo.zig");
 const ConstantPool = @import("ConstantPool.zig");
@@ -112,7 +112,7 @@ fields: std.ArrayList(FieldInfo),
 /// Methods the class has
 methods: std.ArrayList(MethodInfo),
 /// Attributes the class has
-attributes: std.ArrayList(attributes.AttributeInfo),
+attributes: std.ArrayList(attr.AttributeInfo),
 
 pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
     const magic = try reader.readInt(u32, .big);
@@ -153,15 +153,15 @@ pub fn decode(allocator: std.mem.Allocator, reader: anytype) !ClassFile {
     methodss.items.len = method_count;
     for (methodss.items) |*m| m.* = try MethodInfo.decode(constant_pool, allocator, reader);
 
-    // var attributess = try std.ArrayList(attributes.AttributeInfo).initCapacity(allocator, try reader.readInt(u16, .big));
-    // for (attributess.items) |*a| a.* = try attributes.AttributeInfo.decode(&constant_pool, allocator, reader);
+    // var attributess = try std.ArrayList(attr.AttributeInfo).initCapacity(allocator, try reader.readInt(u16, .big));
+    // for (attributess.items) |*a| a.* = try attr.AttributeInfo.decode(&constant_pool, allocator, reader);
     // TODO: Fix this awful, dangerous, slow hack
     const attributes_length = try reader.readInt(u16, .big);
     var attributes_index: usize = 0;
-    var attributess = std.ArrayList(attributes.AttributeInfo).init(allocator);
+    var attributess: std.ArrayList(attr.AttributeInfo) = .empty;
     while (attributes_index < attributes_length) : (attributes_index += 1) {
-        const decoded = try attributes.AttributeInfo.decode(constant_pool, allocator, reader);
-        try attributess.append(decoded);
+        const decoded = try attr.AttributeInfo.decode(constant_pool, allocator, reader);
+        try attributess.append(allocator, decoded);
     }
 
     return ClassFile{
@@ -229,17 +229,17 @@ pub fn encode(self: *const ClassFile, writer: anytype, constant_pool: *ConstantP
     for (self.attributes.items) |a| try a.encode(writer, constant_pool);
 }
 
-pub fn deinit(self: *ClassFile) void {
-    self.interfaces.deinit();
+pub fn deinit(self: *ClassFile, allocator: std.mem.Allocator) void {
+    self.interfaces.deinit(allocator);
 
-    for (self.fields.items) |*fie| fie.deinit();
-    self.fields.deinit();
+    for (self.fields.items) |*fie| fie.deinit(allocator);
+    self.fields.deinit(allocator);
 
-    for (self.methods.items) |*met| met.deinit();
-    self.methods.deinit();
+    for (self.methods.items) |*met| met.deinit(allocator);
+    self.methods.deinit(allocator);
 
     for (self.attributes.items) |*att| att.deinit();
-    self.attributes.deinit();
+    self.attributes.deinit(allocator);
 
     self.constant_pool.deinit();
 }

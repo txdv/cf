@@ -10,7 +10,7 @@ const attributes = @import("src/attributes.zig");
 const AttributeInfo = attributes.AttributeInfo;
 const ExceptionsAttribute = attributes.ExceptionsAttribute;
 const CodeAttribute = attributes.CodeAttribute;
-const Writer = std.io.BufferedWriter(4096, std.fs.File.Writer).Writer;
+const Writer = *std.Io.Writer;
 const ops = @import("src/bytecode/ops.zig");
 const Operation = ops.Operation;
 
@@ -20,9 +20,10 @@ const Utils = @import("Utils.zig");
 const FileData = Utils.FileData;
 
 pub fn main() !void {
-    const out = std.io.getStdOut().writer();
-    var buf = std.io.bufferedWriter(out);
-    const w = buf.writer();
+    var stdout_buffer: [4096]u8 = undefined;
+    const stdout = std.fs.File.stdout();
+    var file_writer = stdout.writer(&stdout_buffer);
+    const w = &file_writer.interface;
 
     const filename = Utils.getFilename();
 
@@ -35,10 +36,10 @@ pub fn main() !void {
     const reader = stream.reader();
 
     var cf = try ClassFile.decode(allocator, reader);
-    defer cf.deinit();
+    defer cf.deinit(allocator);
 
     try printVerbose(w, cf, file_data);
-    try buf.flush();
+    try w.flush();
 }
 
 fn printSimple(writer: Writer, cf: ClassFile) !void {
@@ -979,7 +980,7 @@ fn printFooter(writer: Writer, cf: ClassFile) !void {
 
                     const count = 25 - intAsStringLength(inner_class.inner_class_info_index);
 
-                    for (count) |_| {
+                    for (0..count) |_| {
                         try writer.print(" ", .{});
                     }
 

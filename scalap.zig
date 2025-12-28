@@ -199,7 +199,7 @@ pub fn main() !void {
     const reader = stream.reader();
 
     var cf = try ClassFile.decode(allocator, reader);
-    defer cf.deinit();
+    defer cf.deinit(allocator);
 
     if (findScalaSig(&cf)) |scalaSig| {
         try Utils.printHex(scalaSig);
@@ -378,7 +378,7 @@ const SymbolInfo = struct {
     fn read2(reader: anytype) !SymbolInfo {
         const name = try readVar(u32, reader);
         const symbol = try readVar(u32, reader);
-        const flags = .{ .value = try readVar(u64, reader) };
+        const flags = Flags{ .value = try readVar(u64, reader) };
         const private_within = try readVar(u32, reader);
         const info = readVar(u32, reader) catch {
             return SymbolInfo{
@@ -873,7 +873,7 @@ const FlagsFields = packed struct {
     fn debug(it: FlagsFields) void {
         std.debug.print("flags = [", .{});
         var i: usize = 0;
-        inline for (@typeInfo(FlagsFields).Struct.fields) |field| {
+        inline for (@typeInfo(FlagsFields).@"struct".fields) |field| {
             if (@field(it, field.name)) {
                 if (i > 0) {
                     std.debug.print(", ", .{});
@@ -990,8 +990,10 @@ const SymbolTable = struct {
     }
 
     fn print(table: SymbolTable) !void {
-        const stdout = std.io.getStdOut();
-        const writer = stdout.writer();
+        var stdout_buffer: [4096]u8 = undefined;
+        const stdout = std.fs.File.stdout();
+        var file_writer = stdout.writer(&stdout_buffer);
+        const writer = &file_writer.interface;
 
         switch (table.h[0]) {
             .object_symbol => |object_symbol| {
@@ -1290,6 +1292,7 @@ const SymbolTable = struct {
         InvalidArgument,
         NotOpenForWriting,
         LockViolation,
+        WriteFailed,
     };
 
     fn findClass(table: SymbolTable, name: u32) ?struct { i: usize, class: ClassSymbol } {

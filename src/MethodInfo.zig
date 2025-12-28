@@ -117,10 +117,10 @@ pub fn decode(constant_pool: *ConstantPool, allocator: std.mem.Allocator, reader
 
     const attributes_length = try reader.readInt(u16, .big);
     var attributes_index: usize = 0;
-    var attributess = std.ArrayList(AttributeInfo).init(allocator);
+    var attributess: std.ArrayList(AttributeInfo) = .empty;
     while (attributes_index < attributes_length) : (attributes_index += 1) {
         const decoded = try AttributeInfo.decode(constant_pool, allocator, reader);
-        try attributess.append(decoded);
+        try attributess.append(allocator, decoded);
     }
 
     return MethodInfo{
@@ -142,7 +142,7 @@ pub fn encode(self: MethodInfo, writer: anytype, constant_pool: *ConstantPool) !
     for (self.attributes.items) |*att| try att.encode(writer, constant_pool);
 }
 
-pub fn deinit(self: MethodInfo) void {
+pub fn deinit(self: *MethodInfo, allocator: std.mem.Allocator) void {
     for (self.attributes.items) |*att| att.deinit();
-    self.attributes.deinit();
+    self.attributes.deinit(allocator);
 }

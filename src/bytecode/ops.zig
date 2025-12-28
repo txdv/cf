@@ -643,9 +643,9 @@ pub const Operation = union(Opcode) {
                 @setEvalBranchQuota(100000);
                 const left = comptime @intFromEnum(std.meta.stringToEnum(Opcode, op.name).?);
                 if (left == opcode) {
-                    return @unionInit(Operation, op.name, if (op.type == void) {} else if (@typeInfo(op.type) == .Struct) z: {
+                    return @unionInit(Operation, op.name, if (op.type == void) {} else if (@typeInfo(op.type) == .@"struct") z: {
                         break :z if (@hasDecl(op.type, "decode")) try @field(op.type, "decode")(allocator, reader) else unreachable;
-                    } else if (@typeInfo(op.type) == .Enum) try reader.readEnum(op.type, .big) else if (@typeInfo(op.type) == .Int) try reader.readInt(op.type, .big) else unreachable);
+                    } else if (@typeInfo(op.type) == .@"enum") try reader.readEnum(op.type, .big) else if (@typeInfo(op.type) == .int) try reader.readInt(op.type, .big) else unreachable);
                 }
             }
         }

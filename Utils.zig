@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const FileData = struct {
-    path_buffer: [std.fs.MAX_PATH_BYTES]u8,
+    path_buffer: [std.fs.max_path_bytes]u8,
     path: []u8,
     data: []const u8,
     mtime: i128,
@@ -27,7 +27,10 @@ pub fn readFileData(allocator: std.mem.Allocator, filename: []const u8, file_dat
 
 pub fn getFilename() []const u8 {
     if (std.os.argv.len < 2) {
-        _ = std.io.getStdErr().writer().print("Specify a file\n", .{}) catch {};
+        var stderr_buffer: [4096]u8 = undefined;
+        const stderr = std.fs.File.stderr();
+        var w = stderr.writer(&stderr_buffer);
+        _ = w.interface.writeAll("Specify a file\n") catch {};
         unreachable;
         //return error.FileNotFound;
     }
